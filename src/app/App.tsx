@@ -6,13 +6,20 @@ import { Craftsmanship } from './components/Craftsmanship';
 import { BlogPreview } from './components/BlogPreview';
 import { Contact } from './components/Contact';
 import { Footer } from './components/Footer';
+import type { HeroContent } from './lib/heroContent';
+import type { AboutContent } from './lib/aboutContent';
 
-export default function App() {
+type AppProps = {
+  heroContent: HeroContent;
+  aboutContent: AboutContent;
+};
+
+export default function App({ heroContent, aboutContent }: AppProps) {
   return (
     <div className="min-h-screen">
       <Navigation />
-      <Hero />
-      <About />
+      <Hero content={heroContent} />
+      <About content={aboutContent} />
       <FeaturedWork />
       <Craftsmanship />
       <BlogPreview />
