@@ -74,22 +74,109 @@ export function Contact({ content }: ContactProps) {
     }
   }
 
+  const studioDetails = [
+    {
+      icon: Mail,
+      label: 'Email',
+      value: 'info@artofnatureeg.com',
+      href: 'mailto:info@artofnatureeg.com',
+    },
+    {
+      icon: Phone,
+      label: 'Phone',
+      value: '+20 103 042 2422',
+      href: 'tel:+201030422422',
+    },
+    {
+      icon: MapPin,
+      label: 'Based In',
+      value: 'Cairo, Egypt',
+      href: '#top',
+    },
+  ];
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const name = String(formData.get('name') ?? '').trim();
+    const email = String(formData.get('email') ?? '').trim();
+    const projectType = String(formData.get('projectType') ?? '').trim();
+    const message = String(formData.get('message') ?? '').trim();
+    const subject = encodeURIComponent(
+      `Project inquiry from ${name || 'Art of Nature website visitor'}`
+    );
+    const body = encodeURIComponent(
+      [
+        `Name: ${name}`,
+        `Email: ${email}`,
+        `Project type: ${projectType || 'Not specified'}`,
+        '',
+        'Project details:',
+        message,
+      ].join('\n')
+    );
+
+    window.location.href = `mailto:info@artofnatureeg.com?subject=${subject}&body=${body}`;
+  }
+
   return (
-    <section id="contact" className="py-32 bg-background">
-      <div className="max-w-4xl mx-auto px-6 lg:px-12">
-        <div className="text-center mb-16">
-          {eyebrow && <p className="mb-4 tracking-widest opacity-60">{eyebrow}</p>}
+    <section id="contact" className="scroll-mt-28 bg-background py-20 sm:py-24 lg:py-32">
+      <div className="section-shell">
+        <div className="reveal-up mb-12 max-w-2xl">
+          {eyebrow && <p className="section-kicker">{eyebrow}</p>}
           {heading && (
-            <h2 className="mb-8" style={{ fontSize: 'clamp(2rem, 4vw, 3.5rem)', lineHeight: '1.2' }}>
+            <h2 style={{ fontSize: 'clamp(2.2rem, 4vw, 4rem)', lineHeight: '1.02' }}>
               {heading}
             </h2>
           )}
           {description && (
-            <p className="max-w-2xl mx-auto opacity-70" style={{ fontSize: '1.0625rem', lineHeight: '1.8' }}>
+            <p className="mt-5 max-w-2xl text-[1.03rem] text-foreground/72" style={{ lineHeight: '1.9' }}>
               {description}
             </p>
           )}
         </div>
+
+        <div className="grid gap-8 lg:grid-cols-[0.82fr_1.18fr]">
+          <div className="reveal-up panel-surface flex flex-col justify-between gap-8 p-6 sm:p-8" style={{ animationDelay: '0.08s' }}>
+            <div>
+              <p className="text-sm font-medium uppercase tracking-[0.3em] text-foreground/45">Direct contact</p>
+              <div className="mt-6 space-y-4">
+                {studioDetails.map((detail) => {
+                  const Icon = detail.icon;
+
+                  return (
+                    <a
+                      key={detail.label}
+                      href={detail.href}
+                      className="flex items-start gap-4 border border-border/80 bg-white/70 p-4 transition-colors hover:border-accent"
+                    >
+                      <span className="mt-1 inline-flex h-10 w-10 items-center justify-center border border-border bg-background">
+                        <Icon size={18} />
+                      </span>
+                      <span>
+                        <span className="block text-xs uppercase tracking-[0.24em] text-foreground/45">
+                          {detail.label}
+                        </span>
+                        <span className="mt-1 block text-sm font-medium text-foreground/82 sm:text-base">
+                          {detail.value}
+                        </span>
+                      </span>
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="border-t border-border pt-6">
+              <p className="text-xs uppercase tracking-[0.24em] text-foreground/45">Good to know</p>
+              <div className="mt-4 space-y-3 text-sm leading-7 text-foreground/68">
+                <p>Best results come from sharing your dimensions, inspiration references, and timeline up front.</p>
+                <p>Submitting the form opens your email app with the project brief pre-filled, so you can review it before sending.</p>
+              </div>
+            </div>
+          </div>
 
         <form className="space-y-6" onSubmit={handleSubmit}>
           <div className="grid md:grid-cols-2 gap-6">
@@ -121,13 +208,11 @@ export function Contact({ content }: ContactProps) {
             {projectTypeLabel && <label htmlFor="project" className="block mb-2">{projectTypeLabel}</label>}
             <select
               id="project"
-              name="projectType"
-              required
               className="w-full px-4 py-3 bg-input-background border border-border focus:outline-none focus:border-accent transition-colors"
             >
-              {projectDefaultOption && <option value="">{projectDefaultOption}</option>}
-              {projectOptions?.map((option) => (
-                <option key={option} value={option}>{option}</option>
+              {projectDefaultOption && <option>{projectDefaultOption}</option>}
+              {projectOptions.map((option) => (
+                <option key={option}>{option}</option>
               ))}
             </select>
           </div>

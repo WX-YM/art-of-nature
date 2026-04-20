@@ -1,41 +1,55 @@
 export function Footer() {
+  const year = new Date().getFullYear();
+  const navigationItems = [
+    { href: '#work', label: 'Work' },
+    { href: '#about', label: 'About' },
+    { href: '#journal', label: 'Journal' },
+    { href: '#contact', label: 'Contact' },
+  ];
+  const connectItems = [
+    { href: 'mailto:info@artofnatureeg.com', label: 'Email the studio' },
+    { href: 'tel:+201030422422', label: 'Call +20 103 042 2422' },
+    { href: '#top', label: 'Back to top' },
+  ];
+
   return (
-    <footer className="py-16 bg-primary text-primary-foreground">
-      <div className="max-w-7xl mx-auto px-6 lg:px-12">
-        <div className="grid md:grid-cols-4 gap-12 mb-12">
+    <footer className="bg-primary py-16 text-primary-foreground">
+      <div className="section-shell">
+        <div className="grid gap-12 md:grid-cols-4">
           <div className="md:col-span-2">
-            <h3 className="mb-4" style={{ fontSize: '1.25rem' }}>Art of Nature</h3>
-            <p className="opacity-70 max-w-sm" style={{ lineHeight: '1.7' }}>
+            <p className="text-sm uppercase tracking-[0.3em] text-primary-foreground/48">Art of Nature</p>
+            <h3 className="mt-3 text-[2rem] leading-none sm:text-[2.3rem]">Built with patience and natural character.</h3>
+            <p className="mt-5 max-w-md text-primary-foreground/70" style={{ lineHeight: '1.8' }}>
               Custom craftsmanship studio creating bespoke furniture and architectural elements from natural materials.
             </p>
           </div>
 
           <div>
-            <h4 className="mb-4">Navigation</h4>
-            <nav className="flex flex-col gap-3 opacity-70">
-              <a href="#work" className="hover:opacity-100 transition-opacity">Work</a>
-              <a href="#about" className="hover:opacity-100 transition-opacity">About</a>
-              <a href="#journal" className="hover:opacity-100 transition-opacity">Journal</a>
-              <a href="#contact" className="hover:opacity-100 transition-opacity">Contact</a>
+            <h4 className="mb-4 text-sm uppercase tracking-[0.24em] text-primary-foreground/48">Navigation</h4>
+            <nav className="flex flex-col gap-3 text-primary-foreground/74">
+              {navigationItems.map((item) => (
+                <a key={item.href} href={item.href} className="transition-opacity hover:opacity-100">
+                  {item.label}
+                </a>
+              ))}
             </nav>
           </div>
 
           <div>
-            <h4 className="mb-4">Connect</h4>
-            <nav className="flex flex-col gap-3 opacity-70">
-              <a href="#" className="hover:opacity-100 transition-opacity">Instagram</a>
-              <a href="#" className="hover:opacity-100 transition-opacity">Pinterest</a>
-              <a href="#" className="hover:opacity-100 transition-opacity">LinkedIn</a>
+            <h4 className="mb-4 text-sm uppercase tracking-[0.24em] text-primary-foreground/48">Connect</h4>
+            <nav className="flex flex-col gap-3 text-primary-foreground/74">
+              {connectItems.map((item) => (
+                <a key={item.href} href={item.href} className="transition-opacity hover:opacity-100">
+                  {item.label}
+                </a>
+              ))}
             </nav>
           </div>
         </div>
 
-        <div className="pt-8 border-t border-primary-foreground/20 flex flex-col md:flex-row justify-between items-center gap-4 opacity-60">
-          <p>© 2026 Art of Nature. All rights reserved.</p>
-          <div className="flex gap-6">
-            <a href="#" className="hover:opacity-100 transition-opacity">Privacy Policy</a>
-            <a href="#" className="hover:opacity-100 transition-opacity">Terms of Service</a>
-          </div>
+        <div className="mt-12 flex flex-col gap-4 border-t border-primary-foreground/20 pt-8 text-sm text-primary-foreground/58 md:flex-row md:items-center md:justify-between">
+          <p>© {year} Art of Nature. Crafted for bespoke interiors in Egypt and beyond.</p>
+          <p>Design consultations available for residential, hospitality, and one-off statement pieces.</p>
         </div>
       </div>
     </footer>
