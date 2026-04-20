@@ -21,7 +21,6 @@ export function Contact() {
   const directContacts = [
     { href: 'mailto:info@artofnatureeg.com', label: 'info@artofnatureeg.com' },
     { href: 'tel:+201030422422', label: '+201030422422' },
-    { href: 'tel:+201030422422', label: '+201030422422' },
   ]
     .map((contact) => ({
       href: contact.href?.trim(),

@@ -1,6 +1,6 @@
-import { Schema, model, models } from 'mongoose';
+import mongoose from 'mongoose';
 
-const aboutContentSchema = new Schema(
+const aboutContentSchema = new mongoose.Schema(
   {
     key: { type: String, required: true, unique: true },
     eyebrow: { type: String, required: true },
@@ -16,4 +16,5 @@ const aboutContentSchema = new Schema(
   }
 );
 
-export const AboutContentModel = models.AboutContent || model('AboutContent', aboutContentSchema);
+export const AboutContentModel =
+  mongoose.models.AboutContent || mongoose.model('AboutContent', aboutContentSchema);

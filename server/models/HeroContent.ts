@@ -1,6 +1,6 @@
-import { Schema, model, models } from 'mongoose';
+import mongoose from 'mongoose';
 
-const heroContentSchema = new Schema(
+const heroContentSchema = new mongoose.Schema(
   {
     key: { type: String, required: true, unique: true },
     eyebrow: { type: String, required: true },
@@ -17,4 +17,5 @@ const heroContentSchema = new Schema(
   }
 );
 
-export const HeroContentModel = models.HeroContent || model('HeroContent', heroContentSchema);
+export const HeroContentModel =
+  mongoose.models.HeroContent || mongoose.model('HeroContent', heroContentSchema);

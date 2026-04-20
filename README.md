@@ -7,5 +7,11 @@
 
   Run `npm i` to install the dependencies.
 
-  Run `npm run dev` to start the development server.
+  Run `npm run dev` or `npm run start` to start the development server.
+
+  Run `npm run build` to create a production build.
+
+  Run `npm run preview` to preview the production build locally.
+
+  Run `npm run dev:ssr` to start the SSR server. This requires `MONGODB_URI` to be set in your environment.
   
