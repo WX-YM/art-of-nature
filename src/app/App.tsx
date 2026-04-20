@@ -8,13 +8,15 @@ import { Contact } from './components/Contact';
 import { Footer } from './components/Footer';
 import type { HeroContent } from './lib/heroContent';
 import type { AboutContent } from './lib/aboutContent';
+import type { ContactContent } from './lib/contactContent';
 
 type AppProps = {
   heroContent: HeroContent;
   aboutContent: AboutContent;
+  contactContent: ContactContent;
 };
 
-export default function App({ heroContent, aboutContent }: AppProps) {
+export default function App({ heroContent, aboutContent, contactContent }: AppProps) {
   return (
     <div className="min-h-screen">
       <Navigation />
@@ -23,7 +25,7 @@ export default function App({ heroContent, aboutContent }: AppProps) {
       <FeaturedWork />
       <Craftsmanship />
       <BlogPreview />
-      <Contact />
+      <Contact content={contactContent} />
       <Footer />
     </div>
   );
