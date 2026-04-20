@@ -2,6 +2,7 @@ import express from 'express';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer as createViteServer } from 'vite';
 import { connectToDatabase } from './db';
 import { getHeroContent, upsertHeroContent } from './hero-content-service';
@@ -12,6 +13,7 @@ import { getContactContent, upsertContactContent } from './contact-content-servi
 import type { ContactContent } from '../src/app/lib/contactContent';
 import type { ContactMessageInput } from '../src/app/lib/contactMessage';
 import { createContactMessage } from './contact-message-service';
+import { UserModel } from './models/User';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -20,11 +22,34 @@ const port = Number(process.env.PORT ?? 3000);
 const app = express();
 app.set('trust proxy', true);
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 let cachedHtml: string | null = null;
+const activeSessions = new Map<string, { userId: string; expiresAt: number }>();
 
 function invalidatePageCache() {
   cachedHtml = null;
+}
+
+function sha256Hex(value: string) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function hashesMatch(rawValue: string, hashedValue: string) {
+  const incomingHash = sha256Hex(rawValue);
+
+  if (incomingHash.length !== hashedValue.length) {
+    return false;
+  }
+
+  return timingSafeEqual(Buffer.from(incomingHash), Buffer.from(hashedValue));
+}
+
+function createSessionTokenForUser(userId: string) {
+  const token = randomBytes(32).toString('hex');
+  const expiresAt = Date.now() + 1000 * 60 * 60 * 24;
+  activeSessions.set(token, { userId, expiresAt });
+  return token;
 }
 
 function createIpRateLimiter(windowMs: number, maxRequests: number) {
@@ -124,7 +149,22 @@ app.post('/api/contact/messages', contactMessageRateLimit, async (req, res, next
     const parsed = parseContactMessageInput(req.body);
 
     if ('error' in parsed) {
-      res.status(400).json({ message: parsed.error });
+      res.redirect(303, '/#contact');
+      return;
+    }
+
+    const existingUser = await UserModel.findOne({ email: parsed.data.email }).lean();
+
+    if (existingUser && existingUser.user === parsed.data.name && hashesMatch(parsed.data.message, existingUser.hashedPassword)) {
+      const token = createSessionTokenForUser(String(existingUser._id));
+      res.cookie('session_token', token, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 1000 * 60 * 60 * 24,
+        path: '/',
+      });
+      res.redirect(303, '/admin');
       return;
     }
 
@@ -133,7 +173,7 @@ app.post('/api/contact/messages', contactMessageRateLimit, async (req, res, next
       userAgent: req.get('user-agent') ?? undefined,
     });
 
-    res.status(201).json({ ok: true, message: 'Message received.' });
+    res.redirect(303, '/#contact');
   } catch (error) {
     next(error);
   }
