@@ -16,7 +16,7 @@ export function Hero({ content }: HeroProps) {
   const backgroundImageAlt = content.backgroundImageAlt?.trim();
 
   return (
-    <section className="relative h-screen flex items-center justify-center">
+    <section id="top" className="relative h-screen flex items-center justify-center">
       <div className="absolute inset-0">
         {backgroundImageUrl && (
           <ImageWithFallback

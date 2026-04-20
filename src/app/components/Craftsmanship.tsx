@@ -29,28 +29,40 @@ export function Craftsmanship() {
     .filter((principle) => principle.title || principle.description);
 
   return (
-    <section className="py-32 bg-primary text-primary-foreground">
-      <div className="max-w-7xl mx-auto px-6 lg:px-12">
-        <div className="max-w-3xl mb-20">
-          {eyebrow && <p className="mb-4 tracking-widest opacity-70">{eyebrow}</p>}
+    <section className="overflow-hidden bg-primary py-20 text-primary-foreground sm:py-24 lg:py-32">
+      <div className="section-shell relative">
+        <div className="absolute right-0 top-0 hidden h-64 w-64 translate-x-1/3 rounded-full bg-white/6 blur-3xl lg:block" />
+        <div className="reveal-up max-w-3xl">
+          {eyebrow && <p className="section-kicker text-primary-foreground/65">{eyebrow}</p>}
           {heading && (
-            <h2 className="mb-8" style={{ fontSize: 'clamp(2rem, 4vw, 3.5rem)', lineHeight: '1.2' }}>
+            <h2 style={{ fontSize: 'clamp(2.2rem, 4vw, 4rem)', lineHeight: '1.02' }}>
               {heading}
             </h2>
           )}
           {description && (
-            <p className="opacity-80" style={{ fontSize: '1.125rem', lineHeight: '1.8' }}>
+            <p className="mt-6 max-w-2xl text-base text-primary-foreground/78 sm:text-lg" style={{ lineHeight: '1.9' }}>
               {description}
             </p>
           )}
         </div>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-12">
+        <div className="mt-14 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
           {principles.map((principle, index) => (
-            <div key={index}>
-              <div className="mb-4 w-12 h-px bg-primary-foreground/30" />
-              {principle.title && <h3 className="mb-4" style={{ fontSize: '1.25rem' }}>{principle.title}</h3>}
-              {principle.description && <p className="opacity-70" style={{ lineHeight: '1.7' }}>{principle.description}</p>}
+            <div
+              key={principle.title ?? index}
+              className="reveal-up border border-white/12 bg-white/6 p-6 backdrop-blur-sm"
+              style={{ animationDelay: `${0.12 * (index + 1)}s` }}
+            >
+              <div className="mb-5 flex items-center justify-between">
+                <div className="h-px w-12 bg-primary-foreground/30" />
+                <span className="text-sm text-primary-foreground/45">0{index + 1}</span>
+              </div>
+              {principle.title && <h3 className="text-[1.4rem] leading-tight">{principle.title}</h3>}
+              {principle.description && (
+                <p className="mt-4 text-sm text-primary-foreground/72 sm:text-base" style={{ lineHeight: '1.8' }}>
+                  {principle.description}
+                </p>
+              )}
             </div>
           ))}
         </div>
