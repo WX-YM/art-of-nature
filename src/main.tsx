@@ -4,12 +4,15 @@ import './styles/index.css';
 import { defaultHeroContent, type HeroContent } from './app/lib/heroContent';
 import { defaultAboutContent, type AboutContent } from './app/lib/aboutContent';
 import { defaultContactContent, type ContactContent } from './app/lib/contactContent';
+import { defaultCraftsmanshipContent, type CraftsmanshipContent } from './app/lib/craftsmanshipContent';
+import { markVisitTracked, shouldTrackVisit } from './app/lib/siteVisitTracking';
 
 declare global {
   interface Window {
     __INITIAL_HERO__?: HeroContent;
     __INITIAL_ABOUT__?: AboutContent;
     __INITIAL_CONTACT__?: ContactContent;
+    __INITIAL_CRAFTSMANSHIP__?: CraftsmanshipContent;
   }
 }
 
@@ -22,9 +25,40 @@ if (!rootElement) {
 const heroContent = window.__INITIAL_HERO__ ?? defaultHeroContent;
 const aboutContent = window.__INITIAL_ABOUT__ ?? defaultAboutContent;
 const contactContent = window.__INITIAL_CONTACT__ ?? defaultContactContent;
+const craftsmanshipContent = window.__INITIAL_CRAFTSMANSHIP__ ?? defaultCraftsmanshipContent;
 
 if (rootElement.hasChildNodes()) {
-  hydrateRoot(rootElement, <App heroContent={heroContent} aboutContent={aboutContent} contactContent={contactContent} />);
+  hydrateRoot(
+    rootElement,
+    <App
+      heroContent={heroContent}
+      aboutContent={aboutContent}
+      contactContent={contactContent}
+      craftsmanshipContent={craftsmanshipContent}
+    />
+  );
 } else {
-  createRoot(rootElement).render(<App heroContent={heroContent} aboutContent={aboutContent} contactContent={contactContent} />);
+  createRoot(rootElement).render(
+    <App
+      heroContent={heroContent}
+      aboutContent={aboutContent}
+      contactContent={contactContent}
+      craftsmanshipContent={craftsmanshipContent}
+    />
+  );
+}
+
+const now = Date.now();
+
+if (shouldTrackVisit(window.localStorage, now)) {
+  fetch('/api/visits/track', {
+    method: 'POST',
+    keepalive: true,
+  })
+    .then((response) => {
+      if (response.ok) {
+        markVisitTracked(window.localStorage, now);
+      }
+    })
+    .catch(() => {});
 }

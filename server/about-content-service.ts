@@ -15,13 +15,16 @@ export async function getAboutContent(): Promise<AboutContent> {
   }
 
   return {
-    eyebrow: doc.eyebrow,
-    heading: doc.heading,
-    paragraph1: doc.paragraph1,
-    paragraph2: doc.paragraph2,
-    paragraph3: doc.paragraph3,
-    imageUrl: doc.imageUrl,
-    imageAlt: doc.imageAlt,
+    eyebrow: doc.eyebrow ?? defaultAboutContent.eyebrow,
+    heading: doc.heading ?? defaultAboutContent.heading,
+    paragraph1: doc.paragraph1 ?? defaultAboutContent.paragraph1,
+    paragraph2: doc.paragraph2 ?? defaultAboutContent.paragraph2,
+    paragraph3: doc.paragraph3 ?? defaultAboutContent.paragraph3,
+    focusPoints: Array.isArray(doc.focusPoints) ? doc.focusPoints : defaultAboutContent.focusPoints,
+    processEyebrow: doc.processEyebrow ?? defaultAboutContent.processEyebrow,
+    processDescription: doc.processDescription ?? defaultAboutContent.processDescription,
+    imageUrl: doc.imageUrl ?? defaultAboutContent.imageUrl,
+    imageAlt: doc.imageAlt ?? defaultAboutContent.imageAlt,
   };
 }
 

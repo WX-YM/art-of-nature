@@ -11,13 +11,13 @@ export function About({ content }: AboutProps) {
   const paragraph1 = content.paragraph1?.trim();
   const paragraph2 = content.paragraph2?.trim();
   const paragraph3 = content.paragraph3?.trim();
+  const focusPoints = (content.focusPoints ?? [])
+    .map((point) => point?.trim())
+    .filter((point): point is string => Boolean(point));
+  const processEyebrow = content.processEyebrow?.trim();
+  const processDescription = content.processDescription?.trim();
   const imageUrl = content.imageUrl?.trim();
   const imageAlt = content.imageAlt?.trim();
-  const focusPoints = [
-    'Material-led design decisions',
-    'Collaborative sketches and revisions',
-    'Built for daily use and longevity',
-  ];
 
   return (
     <section id="about" className="scroll-mt-28 bg-white py-20 sm:py-24 lg:py-32">
@@ -64,10 +64,8 @@ export function About({ content }: AboutProps) {
                   />
                 </div>
                 <div className="panel-surface absolute bottom-4 left-4 max-w-xs px-4 py-4 sm:bottom-6 sm:left-6">
-                  <p className="text-xs uppercase tracking-[0.3em] text-foreground/55">Process</p>
-                  <p className="mt-2 text-sm leading-7 text-foreground/78">
-                    Every project is shaped around proportion, material, and the atmosphere you want a room to hold.
-                  </p>
+                  {processEyebrow && <p className="text-xs uppercase tracking-[0.3em] text-foreground/55">{processEyebrow}</p>}
+                  {processDescription && <p className="mt-2 text-sm leading-7 text-foreground/78">{processDescription}</p>}
                 </div>
               </div>
             </div>

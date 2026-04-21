@@ -1,27 +1,15 @@
-export function Craftsmanship() {
-  const eyebrow = 'OUR APPROACH'.trim();
-  const heading = 'Why Custom-Made Matters'.trim();
-  const description =
-    'In a world of mass production, we believe in the value of pieces created with intention, skill, and respect for both material and maker.'.trim();
+import type { CraftsmanshipContent } from '../lib/craftsmanshipContent';
 
-  const principles = [
-    {
-      title: 'Made to Order',
-      description: 'Every piece begins with a conversation. We design specifically for your space, your needs, and your vision.'
-    },
-    {
-      title: 'Natural Materials',
-      description: 'We work primarily with sustainably sourced hardwoods, celebrating the inherent beauty and character of each piece of timber.'
-    },
-    {
-      title: 'Traditional Techniques',
-      description: 'Time-honored joinery methods combined with contemporary design sensibilities create pieces that endure.'
-    },
-    {
-      title: 'Built to Last',
-      description: 'Our commitment to quality means furniture that becomes part of your life for generations, not seasons.'
-    }
-  ]
+type CraftsmanshipProps = {
+  content: CraftsmanshipContent;
+};
+
+export function Craftsmanship({ content }: CraftsmanshipProps) {
+  const eyebrow = content.eyebrow?.trim();
+  const heading = content.heading?.trim();
+  const description = content.description?.trim();
+
+  const principles = (content.items ?? [])
     .map((principle) => ({
       title: principle.title?.trim(),
       description: principle.description?.trim(),

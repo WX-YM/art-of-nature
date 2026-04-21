@@ -15,21 +15,21 @@ export async function getContactContent(): Promise<ContactContent> {
   }
 
   return {
-    eyebrow: doc.eyebrow,
-    heading: doc.heading,
-    description: doc.description,
-    nameLabel: doc.nameLabel,
-    namePlaceholder: doc.namePlaceholder,
-    emailLabel: doc.emailLabel,
-    emailPlaceholder: doc.emailPlaceholder,
-    projectTypeLabel: doc.projectTypeLabel,
-    projectDefaultOption: doc.projectDefaultOption,
-    projectOptions: doc.projectOptions,
-    messageLabel: doc.messageLabel,
-    messagePlaceholder: doc.messagePlaceholder,
-    submitText: doc.submitText,
-    directContactLabel: doc.directContactLabel,
-    directContacts: doc.directContacts,
+    eyebrow: doc.eyebrow ?? defaultContactContent.eyebrow,
+    heading: doc.heading ?? defaultContactContent.heading,
+    description: doc.description ?? defaultContactContent.description,
+    nameLabel: doc.nameLabel ?? defaultContactContent.nameLabel,
+    namePlaceholder: doc.namePlaceholder ?? defaultContactContent.namePlaceholder,
+    emailLabel: doc.emailLabel ?? defaultContactContent.emailLabel,
+    emailPlaceholder: doc.emailPlaceholder ?? defaultContactContent.emailPlaceholder,
+    projectTypeLabel: doc.projectTypeLabel ?? defaultContactContent.projectTypeLabel,
+    projectDefaultOption: doc.projectDefaultOption ?? defaultContactContent.projectDefaultOption,
+    projectOptions: Array.isArray(doc.projectOptions) ? doc.projectOptions : defaultContactContent.projectOptions,
+    messageLabel: doc.messageLabel ?? defaultContactContent.messageLabel,
+    messagePlaceholder: doc.messagePlaceholder ?? defaultContactContent.messagePlaceholder,
+    submitText: doc.submitText ?? defaultContactContent.submitText,
+    directContactLabel: doc.directContactLabel ?? defaultContactContent.directContactLabel,
+    directContacts: Array.isArray(doc.directContacts) ? doc.directContacts : defaultContactContent.directContacts,
   };
 }
 

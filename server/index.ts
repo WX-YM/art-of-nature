@@ -2,18 +2,30 @@ import express from 'express';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { createServer as createViteServer } from 'vite';
 import { connectToDatabase } from './db';
 import { getHeroContent, upsertHeroContent } from './hero-content-service';
-import type { HeroContent } from '../src/app/lib/heroContent';
+import { defaultHeroContent, type HeroContent } from '../src/app/lib/heroContent';
 import { getAboutContent, upsertAboutContent } from './about-content-service';
-import type { AboutContent } from '../src/app/lib/aboutContent';
+import { defaultAboutContent, type AboutContent } from '../src/app/lib/aboutContent';
 import { getContactContent, upsertContactContent } from './contact-content-service';
-import type { ContactContent } from '../src/app/lib/contactContent';
-import type { ContactMessageInput } from '../src/app/lib/contactMessage';
+import { defaultContactContent, type ContactContent } from '../src/app/lib/contactContent';
+import { getCraftsmanshipContent, upsertCraftsmanshipContent } from './craftsmanship-content-service';
+import { defaultCraftsmanshipContent, type CraftsmanshipContent } from '../src/app/lib/craftsmanshipContent';
 import { createContactMessage } from './contact-message-service';
+import { getVisitCount, incrementVisitCount } from './site-visit-service';
+import { ContactMessageModel } from './models/ContactMessage';
 import { UserModel } from './models/User';
+import {
+  createIpRateLimiter,
+  escapeHtml,
+  getCookieValue,
+  hashesMatch,
+  isAuthorizedForInvalidation,
+  parseContactMessageInput,
+  serializeForScript,
+} from './http-utils';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -31,20 +43,6 @@ function invalidatePageCache() {
   cachedHtml = null;
 }
 
-function sha256Hex(value: string) {
-  return createHash('sha256').update(value).digest('hex');
-}
-
-function hashesMatch(rawValue: string, hashedValue: string) {
-  const incomingHash = sha256Hex(rawValue);
-
-  if (incomingHash.length !== hashedValue.length) {
-    return false;
-  }
-
-  return timingSafeEqual(Buffer.from(incomingHash), Buffer.from(hashedValue));
-}
-
 function createSessionTokenForUser(userId: string) {
   const token = randomBytes(32).toString('hex');
   const expiresAt = Date.now() + 1000 * 60 * 60 * 24;
@@ -52,93 +50,446 @@ function createSessionTokenForUser(userId: string) {
   return token;
 }
 
-function createIpRateLimiter(windowMs: number, maxRequests: number) {
-  const requestsByIp = new Map<string, { count: number; windowStart: number }>();
+function getActiveSessionFromRequest(req: express.Request) {
+  const sessionToken = getCookieValue(req.header('cookie'), 'session_token');
+  if (!sessionToken) {
+    return null;
+  }
 
-  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const now = Date.now();
-    const ip = req.ip || 'unknown';
-    const current = requestsByIp.get(ip);
+  const session = activeSessions.get(sessionToken);
+  if (!session) {
+    return null;
+  }
 
-    if (!current || now - current.windowStart >= windowMs) {
-      requestsByIp.set(ip, { count: 1, windowStart: now });
-      res.setHeader('X-RateLimit-Limit', String(maxRequests));
-      res.setHeader('X-RateLimit-Remaining', String(Math.max(maxRequests - 1, 0)));
-      next();
-      return;
-    }
+  if (session.expiresAt <= Date.now()) {
+    activeSessions.delete(sessionToken);
+    return null;
+  }
 
-    if (current.count >= maxRequests) {
-      const retryAfterSeconds = Math.ceil((windowMs - (now - current.windowStart)) / 1000);
-      res.setHeader('Retry-After', String(Math.max(retryAfterSeconds, 1)));
-      res.setHeader('X-RateLimit-Limit', String(maxRequests));
-      res.setHeader('X-RateLimit-Remaining', '0');
-      res.status(429).json({ message: 'Too many requests. Please try again later.' });
-      return;
-    }
-
-    current.count += 1;
-    requestsByIp.set(ip, current);
-    res.setHeader('X-RateLimit-Limit', String(maxRequests));
-    res.setHeader('X-RateLimit-Remaining', String(Math.max(maxRequests - current.count, 0)));
-    next();
-  };
+  return session;
 }
 
-function parseContactMessageInput(body: unknown): { data: ContactMessageInput } | { error: string } {
-  if (!body || typeof body !== 'object') {
-    return { error: 'Invalid request body.' };
+function respondHiddenNotFound(res: express.Response) {
+  res.status(404).set({ 'Content-Type': 'text/plain; charset=utf-8' }).send('Not Found');
+}
+
+function parseRequiredStringField(body: unknown, fieldName: string, maxLength: number = 10000): string {
+  const value = (body as Record<string, unknown>)[fieldName];
+  const parsed = typeof value === 'string' ? value.trim() : '';
+
+  if (!parsed || parsed.length > maxLength) {
+    throw new Error(`Invalid ${fieldName}.`);
   }
 
-  const raw = body as Record<string, unknown>;
-  const name = typeof raw.name === 'string' ? raw.name.trim() : '';
-  const email = typeof raw.email === 'string' ? raw.email.trim() : '';
-  const projectType = typeof raw.projectType === 'string' ? raw.projectType.trim() : '';
-  const message = typeof raw.message === 'string' ? raw.message.trim() : '';
+  return parsed;
+}
 
-  if (!name || !email || !projectType || !message) {
-    return { error: 'All fields are required.' };
+function parseMultilineField(body: unknown, fieldName: string): string[] {
+  const raw = (body as Record<string, unknown>)[fieldName];
+  if (typeof raw !== 'string') {
+    return [];
   }
 
-  if (name.length > 120 || email.length > 254 || projectType.length > 120 || message.length > 5000) {
-    return { error: 'One or more fields exceed allowed length.' };
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function toContactLinksText(directContacts: ContactContent['directContacts']): string {
+  return directContacts.map((item) => `${item.href} | ${item.label}`).join('\n');
+}
+
+function toCraftsmanshipItemsText(items: CraftsmanshipContent['items']): string {
+  return items.map((item) => `${item.title} | ${item.description}`).join('\n');
+}
+
+function parseDirectContacts(body: unknown, fieldName: string): ContactContent['directContacts'] {
+  return parseMultilineField(body, fieldName)
+    .map((line) => {
+      const separatorIndex = line.indexOf('|');
+      if (separatorIndex < 0) {
+        return null;
+      }
+
+      const href = line.slice(0, separatorIndex).trim();
+      const label = line.slice(separatorIndex + 1).trim();
+
+      if (!href || !label) {
+        return null;
+      }
+
+      return { href, label };
+    })
+    .filter((item): item is { href: string; label: string } => item !== null);
+}
+
+function parseCraftsmanshipItems(body: unknown, fieldName: string): CraftsmanshipContent['items'] {
+  return parseMultilineField(body, fieldName)
+    .map((line) => {
+      const separatorIndex = line.indexOf('|');
+      if (separatorIndex < 0) {
+        return null;
+      }
+
+      const title = line.slice(0, separatorIndex).trim();
+      const description = line.slice(separatorIndex + 1).trim();
+
+      if (!title || !description) {
+        return null;
+      }
+
+      return { title, description };
+    })
+    .filter((item): item is { title: string; description: string } => item !== null);
+}
+
+async function getAuthenticatedUser(req: express.Request) {
+  const session = getActiveSessionFromRequest(req);
+
+  if (!session) {
+    return null;
   }
 
-  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailPattern.test(email)) {
-    return { error: 'Please provide a valid email address.' };
+  const user = await UserModel.findById(session.userId).lean();
+  if (!user) {
+    return null;
   }
 
-  return {
-    data: {
-      name,
-      email,
-      projectType,
-      message,
-    },
-  };
+  return user;
 }
 
 const contactMessageRateLimit = createIpRateLimiter(10 * 60 * 1000, 5);
-
-function serializeForScript(data: unknown) {
-  return JSON.stringify(data).replace(/</g, '\\u003c');
-}
-
-function isAuthorizedForInvalidation(requestToken: string | undefined) {
-  const expectedToken = process.env.CACHE_INVALIDATE_TOKEN;
-
-  if (!expectedToken) {
-    return true;
-  }
-
-  return requestToken === expectedToken;
-}
+const siteVisitTrackRateLimit = createIpRateLimiter(60 * 60 * 1000, 1);
 
 app.get('/api/hero', async (_req, res, next) => {
   try {
     const hero = await getHeroContent();
     res.json(hero);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/admin', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const [totalVisits, totalContactMessages, hero, about, contact, craftsmanship] = await Promise.all([
+      getVisitCount(),
+      ContactMessageModel.countDocuments(),
+      getHeroContent(),
+      getAboutContent(),
+      getContactContent(),
+      getCraftsmanshipContent(),
+    ]);
+    const safeUserName = escapeHtml(user.user);
+    const status = new URL(req.originalUrl, 'http://localhost').searchParams.get('status');
+    const statusMessage =
+      status === 'saved'
+        ? 'Content saved.'
+        : status === 'reset'
+          ? 'Content reset to defaults.'
+          : status === 'invalid'
+            ? 'Invalid form values.'
+            : '';
+
+    res
+      .status(200)
+      .set({ 'Content-Type': 'text/html; charset=utf-8' })
+      .send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard</title>
+    <style>
+      body { font-family: Inter, Arial, sans-serif; margin: 0; background: #f3f4f6; color: #111827; }
+      main { max-width: 980px; margin: 2rem auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 1.5rem 1.75rem; box-shadow: 0 12px 35px rgba(17, 24, 39, 0.08); }
+      section { border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem; background: #fafafa; margin-top: 1rem; }
+      h2 { margin-top: 0; font-size: 1.1rem; }
+      form p { margin: 0.75rem 0; }
+      label { display: block; font-size: 0.92rem; color: #374151; }
+      input, textarea { width: 100%; margin-top: 0.35rem; border: 1px solid #d1d5db; border-radius: 8px; padding: 0.62rem 0.75rem; font: inherit; background: #fff; }
+      textarea { min-height: 80px; resize: vertical; }
+      button { border: none; background: #111827; color: #fff; border-radius: 8px; padding: 0.58rem 0.9rem; cursor: pointer; font-weight: 600; }
+      button:hover { opacity: 0.92; }
+      .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
+      .stat-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 0.8rem; background: #fff; }
+      .status-message { padding: 0.75rem 1rem; border-radius: 8px; background: #ecfeff; color: #0f766e; border: 1px solid #99f6e4; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 style="margin-top: 0;">Hidden Dashboard</h1>
+      <p style="margin-bottom: 1.5rem; color: #4b5563;">Signed in as <strong>${safeUserName}</strong></p>
+      ${
+        statusMessage
+          ? `<p class="status-message">${escapeHtml(statusMessage)}</p>`
+          : ''
+      }
+      <section class="stats">
+        <div class="stat-card"><strong>Total visits:</strong> ${totalVisits}</div>
+        <div class="stat-card"><strong>Total contact messages:</strong> ${totalContactMessages}</div>
+      </section>
+      <section>
+        <h2>Hero Content</h2>
+        <form method="post" action="/admin/content/hero">
+          <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(hero.eyebrow)}" /></label></p>
+          <p><label>Heading Line 1<br /><input name="headingLine1" required style="width:100%;" value="${escapeHtml(hero.headingLine1)}" /></label></p>
+          <p><label>Heading Line 2<br /><input name="headingLine2" required style="width:100%;" value="${escapeHtml(hero.headingLine2)}" /></label></p>
+          <p><label>Description<br /><textarea name="description" required style="width:100%; min-height: 70px;">${escapeHtml(hero.description)}</textarea></label></p>
+          <p><label>CTA Text<br /><input name="ctaText" required style="width:100%;" value="${escapeHtml(hero.ctaText)}" /></label></p>
+          <p><label>CTA Href<br /><input name="ctaHref" required style="width:100%;" value="${escapeHtml(hero.ctaHref)}" /></label></p>
+          <p><label>Background Image URL<br /><input name="backgroundImageUrl" required style="width:100%;" value="${escapeHtml(hero.backgroundImageUrl)}" /></label></p>
+          <p><label>Background Image Alt<br /><input name="backgroundImageAlt" required style="width:100%;" value="${escapeHtml(hero.backgroundImageAlt)}" /></label></p>
+          <p><button type="submit">Save Hero</button></p>
+        </form>
+      </section>
+      <hr style="margin: 1.25rem 0; border: none; border-top: 1px solid #e5e7eb;" />
+      <section>
+        <h2>About Content</h2>
+        <form method="post" action="/admin/content/about">
+          <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(about.eyebrow)}" /></label></p>
+          <p><label>Heading<br /><input name="heading" required style="width:100%;" value="${escapeHtml(about.heading)}" /></label></p>
+          <p><label>Paragraph 1<br /><textarea name="paragraph1" required style="width:100%; min-height: 70px;">${escapeHtml(about.paragraph1)}</textarea></label></p>
+          <p><label>Paragraph 2<br /><textarea name="paragraph2" required style="width:100%; min-height: 70px;">${escapeHtml(about.paragraph2)}</textarea></label></p>
+          <p><label>Paragraph 3<br /><textarea name="paragraph3" required style="width:100%; min-height: 70px;">${escapeHtml(about.paragraph3)}</textarea></label></p>
+          <p><label>Focus Boxes (one per line)<br /><textarea name="focusPoints" required style="width:100%; min-height: 90px;">${escapeHtml(about.focusPoints.join('\n'))}</textarea></label></p>
+          <p><label>Process Kicker<br /><input name="processEyebrow" required style="width:100%;" value="${escapeHtml(about.processEyebrow)}" /></label></p>
+          <p><label>Process Description<br /><textarea name="processDescription" required style="width:100%; min-height: 70px;">${escapeHtml(about.processDescription)}</textarea></label></p>
+          <p><label>Image URL<br /><input name="imageUrl" required style="width:100%;" value="${escapeHtml(about.imageUrl)}" /></label></p>
+          <p><label>Image Alt<br /><input name="imageAlt" required style="width:100%;" value="${escapeHtml(about.imageAlt)}" /></label></p>
+          <p><button type="submit">Save About</button></p>
+        </form>
+      </section>
+      <hr style="margin: 1.25rem 0; border: none; border-top: 1px solid #e5e7eb;" />
+      <section>
+        <h2>Contact Content</h2>
+        <form method="post" action="/admin/content/contact">
+          <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(contact.eyebrow)}" /></label></p>
+          <p><label>Heading<br /><input name="heading" required style="width:100%;" value="${escapeHtml(contact.heading)}" /></label></p>
+          <p><label>Description<br /><textarea name="description" required style="width:100%; min-height: 70px;">${escapeHtml(contact.description)}</textarea></label></p>
+          <p><label>Name Label<br /><input name="nameLabel" required style="width:100%;" value="${escapeHtml(contact.nameLabel)}" /></label></p>
+          <p><label>Name Placeholder<br /><input name="namePlaceholder" required style="width:100%;" value="${escapeHtml(contact.namePlaceholder)}" /></label></p>
+          <p><label>Email Label<br /><input name="emailLabel" required style="width:100%;" value="${escapeHtml(contact.emailLabel)}" /></label></p>
+          <p><label>Email Placeholder<br /><input name="emailPlaceholder" required style="width:100%;" value="${escapeHtml(contact.emailPlaceholder)}" /></label></p>
+          <p><label>Project Type Label<br /><input name="projectTypeLabel" required style="width:100%;" value="${escapeHtml(contact.projectTypeLabel)}" /></label></p>
+          <p><label>Project Default Option<br /><input name="projectDefaultOption" required style="width:100%;" value="${escapeHtml(contact.projectDefaultOption)}" /></label></p>
+          <p><label>Project Options (one per line)<br /><textarea name="projectOptions" required style="width:100%; min-height: 90px;">${escapeHtml(contact.projectOptions.join('\n'))}</textarea></label></p>
+          <p><label>Message Label<br /><input name="messageLabel" required style="width:100%;" value="${escapeHtml(contact.messageLabel)}" /></label></p>
+          <p><label>Message Placeholder<br /><textarea name="messagePlaceholder" required style="width:100%; min-height: 70px;">${escapeHtml(contact.messagePlaceholder)}</textarea></label></p>
+          <p><label>Submit Text<br /><input name="submitText" required style="width:100%;" value="${escapeHtml(contact.submitText)}" /></label></p>
+          <p><label>Direct Contact Label<br /><input name="directContactLabel" required style="width:100%;" value="${escapeHtml(contact.directContactLabel)}" /></label></p>
+          <p><label>Direct Contacts (href | label, one per line)<br /><textarea name="directContacts" required style="width:100%; min-height: 90px;">${escapeHtml(toContactLinksText(contact.directContacts))}</textarea></label></p>
+          <p><button type="submit">Save Contact</button></p>
+        </form>
+      </section>
+      <section>
+        <h2>Craftsmanship Content</h2>
+        <form method="post" action="/admin/content/craftsmanship">
+          <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(craftsmanship.eyebrow)}" /></label></p>
+          <p><label>Heading<br /><input name="heading" required style="width:100%;" value="${escapeHtml(craftsmanship.heading)}" /></label></p>
+          <p><label>Description<br /><textarea name="description" required style="width:100%; min-height: 70px;">${escapeHtml(craftsmanship.description)}</textarea></label></p>
+          <p><label>Cards (title | description, one per line)<br /><textarea name="items" required style="width:100%; min-height: 110px;">${escapeHtml(toCraftsmanshipItemsText(craftsmanship.items))}</textarea></label></p>
+          <p><button type="submit">Save Craftsmanship</button></p>
+        </form>
+      </section>
+      <section>
+        <h2>Reset</h2>
+        <form method="post" action="/admin/content/reset" onsubmit="return confirm('Reset all website content to defaults?');">
+          <button type="submit" style="background: #b91c1c; color: #fff; border: none; padding: 0.55rem 0.85rem; border-radius: 6px;">Reset all content</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>`);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/admin/content/hero', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const content: HeroContent = {
+      eyebrow: parseRequiredStringField(req.body, 'eyebrow', 200),
+      headingLine1: parseRequiredStringField(req.body, 'headingLine1', 200),
+      headingLine2: parseRequiredStringField(req.body, 'headingLine2', 200),
+      description: parseRequiredStringField(req.body, 'description', 2000),
+      ctaText: parseRequiredStringField(req.body, 'ctaText', 120),
+      ctaHref: parseRequiredStringField(req.body, 'ctaHref', 500),
+      backgroundImageUrl: parseRequiredStringField(req.body, 'backgroundImageUrl', 2000),
+      backgroundImageAlt: parseRequiredStringField(req.body, 'backgroundImageAlt', 200),
+    };
+
+    await upsertHeroContent(content);
+    invalidatePageCache();
+    res.redirect(303, '/admin?status=saved');
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Invalid')) {
+      res.redirect(303, '/admin?status=invalid');
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.post('/admin/content/about', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const focusPoints = parseMultilineField(req.body, 'focusPoints');
+
+    if (focusPoints.length === 0) {
+      res.redirect(303, '/admin?status=invalid');
+      return;
+    }
+
+    const content: AboutContent = {
+      eyebrow: parseRequiredStringField(req.body, 'eyebrow', 200),
+      heading: parseRequiredStringField(req.body, 'heading', 200),
+      paragraph1: parseRequiredStringField(req.body, 'paragraph1', 3000),
+      paragraph2: parseRequiredStringField(req.body, 'paragraph2', 3000),
+      paragraph3: parseRequiredStringField(req.body, 'paragraph3', 3000),
+      focusPoints,
+      processEyebrow: parseRequiredStringField(req.body, 'processEyebrow', 120),
+      processDescription: parseRequiredStringField(req.body, 'processDescription', 2000),
+      imageUrl: parseRequiredStringField(req.body, 'imageUrl', 2000),
+      imageAlt: parseRequiredStringField(req.body, 'imageAlt', 200),
+    };
+
+    await upsertAboutContent(content);
+    invalidatePageCache();
+    res.redirect(303, '/admin?status=saved');
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Invalid')) {
+      res.redirect(303, '/admin?status=invalid');
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.post('/admin/content/contact', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const projectOptions = parseMultilineField(req.body, 'projectOptions');
+    const directContacts = parseDirectContacts(req.body, 'directContacts');
+
+    if (projectOptions.length === 0 || directContacts.length === 0) {
+      res.redirect(303, '/admin?status=invalid');
+      return;
+    }
+
+    const content: ContactContent = {
+      eyebrow: parseRequiredStringField(req.body, 'eyebrow', 200),
+      heading: parseRequiredStringField(req.body, 'heading', 200),
+      description: parseRequiredStringField(req.body, 'description', 3000),
+      nameLabel: parseRequiredStringField(req.body, 'nameLabel', 120),
+      namePlaceholder: parseRequiredStringField(req.body, 'namePlaceholder', 200),
+      emailLabel: parseRequiredStringField(req.body, 'emailLabel', 120),
+      emailPlaceholder: parseRequiredStringField(req.body, 'emailPlaceholder', 200),
+      projectTypeLabel: parseRequiredStringField(req.body, 'projectTypeLabel', 120),
+      projectDefaultOption: parseRequiredStringField(req.body, 'projectDefaultOption', 120),
+      projectOptions,
+      messageLabel: parseRequiredStringField(req.body, 'messageLabel', 160),
+      messagePlaceholder: parseRequiredStringField(req.body, 'messagePlaceholder', 3000),
+      submitText: parseRequiredStringField(req.body, 'submitText', 120),
+      directContactLabel: parseRequiredStringField(req.body, 'directContactLabel', 200),
+      directContacts,
+    };
+
+    await upsertContactContent(content);
+    invalidatePageCache();
+    res.redirect(303, '/admin?status=saved');
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Invalid')) {
+      res.redirect(303, '/admin?status=invalid');
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.post('/admin/content/craftsmanship', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const items = parseCraftsmanshipItems(req.body, 'items');
+
+    if (items.length === 0) {
+      res.redirect(303, '/admin?status=invalid');
+      return;
+    }
+
+    const content: CraftsmanshipContent = {
+      eyebrow: parseRequiredStringField(req.body, 'eyebrow', 200),
+      heading: parseRequiredStringField(req.body, 'heading', 200),
+      description: parseRequiredStringField(req.body, 'description', 3000),
+      items,
+    };
+
+    await upsertCraftsmanshipContent(content);
+    invalidatePageCache();
+    res.redirect(303, '/admin?status=saved');
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Invalid')) {
+      res.redirect(303, '/admin?status=invalid');
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.post('/admin/content/reset', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    await Promise.all([
+      upsertHeroContent(defaultHeroContent),
+      upsertAboutContent(defaultAboutContent),
+      upsertContactContent(defaultContactContent),
+      upsertCraftsmanshipContent(defaultCraftsmanshipContent),
+    ]);
+
+    invalidatePageCache();
+    res.redirect(303, '/admin?status=reset');
   } catch (error) {
     next(error);
   }
@@ -197,6 +548,33 @@ app.get('/api/contact', async (_req, res, next) => {
   }
 });
 
+app.get('/api/craftsmanship', async (_req, res, next) => {
+  try {
+    const craftsmanship = await getCraftsmanshipContent();
+    res.json(craftsmanship);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/visits/track', siteVisitTrackRateLimit, async (_req, res, next) => {
+  try {
+    await incrementVisitCount();
+    res.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/visits', async (_req, res, next) => {
+  try {
+    const totalVisits = await getVisitCount();
+    res.json({ totalVisits });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.put('/api/about', async (req, res, next) => {
   try {
     const content = req.body as AboutContent;
@@ -223,6 +601,17 @@ app.put('/api/contact', async (req, res, next) => {
   try {
     const content = req.body as ContactContent;
     const saved = await upsertContactContent(content);
+    invalidatePageCache();
+    res.json(saved);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/craftsmanship', async (req, res, next) => {
+  try {
+    const content = req.body as CraftsmanshipContent;
+    const saved = await upsertCraftsmanshipContent(content);
     invalidatePageCache();
     res.json(saved);
   } catch (error) {
@@ -267,9 +656,10 @@ app.get('*', async (req, res, next) => {
     const heroContent = await getHeroContent();
     const aboutContent = await getAboutContent();
     const contactContent = await getContactContent();
-    const appHtml = render(heroContent, aboutContent, contactContent);
+    const craftsmanshipContent = await getCraftsmanshipContent();
+    const appHtml = render(heroContent, aboutContent, contactContent, craftsmanshipContent);
 
-    const initialDataScript = `<script>window.__INITIAL_HERO__=${serializeForScript(heroContent)};window.__INITIAL_ABOUT__=${serializeForScript(aboutContent)};window.__INITIAL_CONTACT__=${serializeForScript(contactContent)}</script>`;
+    const initialDataScript = `<script>window.__INITIAL_HERO__=${serializeForScript(heroContent)};window.__INITIAL_ABOUT__=${serializeForScript(aboutContent)};window.__INITIAL_CONTACT__=${serializeForScript(contactContent)};window.__INITIAL_CRAFTSMANSHIP__=${serializeForScript(craftsmanshipContent)}</script>`;
     const html = template.replace('<div id="root"></div>', `<div id="root">${appHtml}</div>${initialDataScript}`);
 
     cachedHtml = html;
