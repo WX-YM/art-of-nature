@@ -75,6 +75,14 @@ function respondHiddenNotFound(res: express.Response) {
   res.status(404).set({ 'Content-Type': 'text/plain; charset=utf-8' }).send('Not Found');
 }
 
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function isMessageStatus(value: unknown): value is 'new' | 'seen' {
+  return value === 'new' || value === 'seen';
+}
+
 import {
   parseRequiredStringField,
   parseMultilineField,
@@ -119,16 +127,41 @@ app.get('/admin', async (req, res, next) => {
       return;
     }
 
-    const [totalVisits, totalContactMessages, hero, about, contact, craftsmanship] = await Promise.all([
+    const adminUrl = new URL(req.originalUrl, 'http://localhost');
+    const activeTab = adminUrl.searchParams.get('tab') === 'messages' ? 'messages' : 'content';
+    const searchQuery = adminUrl.searchParams.get('q')?.trim() ?? '';
+    const messageStatusFilter = adminUrl.searchParams.get('messageStatus');
+    const statusFilter = isMessageStatus(messageStatusFilter) ? messageStatusFilter : 'all';
+
+    const messageQuery: Record<string, unknown> = {};
+    if (statusFilter !== 'all') {
+      messageQuery.status = statusFilter;
+    }
+
+    if (searchQuery) {
+      const searchPattern = new RegExp(escapeRegex(searchQuery), 'i');
+      messageQuery.$or = [
+        { name: searchPattern },
+        { email: searchPattern },
+        { phone: searchPattern },
+        { projectType: searchPattern },
+        { message: searchPattern },
+      ];
+    }
+
+    const [totalVisits, totalContactMessages, hero, about, contact, craftsmanship, contactMessages] = await Promise.all([
       getVisitCount(),
       ContactMessageModel.countDocuments(),
       getHeroContent(),
       getAboutContent(),
       getContactContent(),
       getCraftsmanshipContent(),
+      activeTab === 'messages'
+        ? ContactMessageModel.find(messageQuery).sort({ createdAt: -1 }).limit(200).lean()
+        : Promise.resolve([]),
     ]);
     const safeUserName = escapeHtml(user.user);
-    const status = new URL(req.originalUrl, 'http://localhost').searchParams.get('status');
+    const status = adminUrl.searchParams.get('status');
     const statusMessage =
       status === 'saved'
         ? 'Content saved.'
@@ -136,7 +169,59 @@ app.get('/admin', async (req, res, next) => {
           ? 'Content reset to defaults.'
           : status === 'invalid'
             ? 'Invalid form values.'
+            : status === 'message-updated'
+              ? 'Message status updated.'
+              : status === 'message-deleted'
+                ? 'Message deleted.'
             : '';
+
+    const messageRowsHtml =
+      activeTab !== 'messages'
+        ? ''
+        : contactMessages.length === 0
+          ? '<tr><td colspan="8" style="padding:0.9rem; text-align:center; color:#6b7280;">No messages found.</td></tr>'
+          : contactMessages
+              .map((entry) => {
+                const id = String((entry as { _id?: unknown })._id ?? '');
+                const name = escapeHtml(String((entry as { name?: unknown }).name ?? ''));
+                const email = escapeHtml(String((entry as { email?: unknown }).email ?? ''));
+                const phone = escapeHtml(String((entry as { phone?: unknown }).phone ?? ''));
+                const projectType = escapeHtml(String((entry as { projectType?: unknown }).projectType ?? ''));
+                const message = escapeHtml(String((entry as { message?: unknown }).message ?? '')).replaceAll('\n', '<br />');
+                const statusValue = isMessageStatus((entry as { status?: unknown }).status)
+                  ? (entry as { status: 'new' | 'seen' }).status
+                  : 'new';
+                const createdAtRaw = (entry as { createdAt?: unknown }).createdAt;
+                const createdAt = createdAtRaw ? escapeHtml(new Date(String(createdAtRaw)).toLocaleString()) : '—';
+                const statusLabel = statusValue === 'seen' ? 'Seen' : 'New';
+                const statusColor = statusValue === 'seen' ? '#2563eb' : '#059669';
+                const nextStatus = statusValue === 'seen' ? 'new' : 'seen';
+                const nextStatusButton = statusValue === 'seen' ? 'Mark New' : 'Mark Seen';
+
+                return `<tr>
+                  <td>${name}</td>
+                  <td>${email}</td>
+                  <td>${phone || '—'}</td>
+                  <td>${projectType}</td>
+                  <td style="max-width:300px;">${message}</td>
+                  <td>${createdAt}</td>
+                  <td><span style="display:inline-block; padding:0.2rem 0.55rem; border-radius:999px; font-size:0.75rem; color:#fff; background:${statusColor};">${statusLabel}</span></td>
+                  <td>
+                    <form method="post" action="/admin/messages/${id}/status" style="display:inline-block; margin-right:0.4rem;">
+                      <input type="hidden" name="status" value="${nextStatus}" />
+                      <input type="hidden" name="q" value="${escapeHtml(searchQuery)}" />
+                      <input type="hidden" name="messageStatus" value="${statusFilter}" />
+                      <button type="submit" style="background:#1f2937;">${nextStatusButton}</button>
+                    </form>
+                    <form method="post" action="/admin/messages/${id}/delete" style="display:inline-block;" onsubmit="return confirm('Delete this contact message?');">
+                      <input type="hidden" name="q" value="${escapeHtml(searchQuery)}" />
+                      <input type="hidden" name="messageStatus" value="${statusFilter}" />
+                      <button type="submit" style="background:#b91c1c;">Delete</button>
+                    </form>
+                  </td>
+                </tr>`;
+              })
+              .join('');
 
     res
       .status(200)
@@ -167,17 +252,29 @@ app.get('/admin', async (req, res, next) => {
       .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
       .stat-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 0.8rem; background: #fff; }
       .status-message { padding: 0.75rem 1rem; border-radius: 8px; background: #ecfeff; color: #0f766e; border: 1px solid #99f6e4; }
+      .tab-row { display: flex; gap: 0.55rem; margin-bottom: 1rem; }
+      .tab-link { display: inline-block; text-decoration: none; border: 1px solid #d1d5db; border-radius: 8px; padding: 0.45rem 0.8rem; color: #374151; background: #fff; }
+      .tab-link.active { background: #111827; border-color: #111827; color: #fff; }
+      .messages-toolbar { display: grid; grid-template-columns: 1fr auto auto; gap: 0.65rem; align-items: end; }
+      .messages-table { width: 100%; border-collapse: collapse; background: #fff; }
+      .messages-table th, .messages-table td { border: 1px solid #e5e7eb; padding: 0.65rem; vertical-align: top; text-align: left; font-size: 0.86rem; }
+      .messages-table th { background: #f9fafb; font-weight: 700; }
     </style>
   </head>
   <body>
     <main>
       <h1 style="margin-top: 0;">Hidden Dashboard</h1>
       <p style="margin-bottom: 1.5rem; color: #4b5563;">Signed in as <strong>${safeUserName}</strong></p>
+      <nav class="tab-row">
+        <a class="tab-link ${activeTab === 'content' ? 'active' : ''}" href="/admin?tab=content">Content</a>
+        <a class="tab-link ${activeTab === 'messages' ? 'active' : ''}" href="/admin?tab=messages">Contact Messages</a>
+      </nav>
       ${
         statusMessage
           ? `<p class="status-message">${escapeHtml(statusMessage)}</p>`
           : ''
       }
+      ${activeTab === 'content' ? `
       <section class="stats">
         <div class="stat-card"><strong>Total visits:</strong> ${totalVisits}</div>
         <div class="stat-card"><strong>Total contact messages:</strong> ${totalContactMessages}</div>
@@ -260,6 +357,41 @@ app.get('/admin', async (req, res, next) => {
           <button type="submit" style="background: #b91c1c; color: #fff; border: none; padding: 0.55rem 0.85rem; border-radius: 6px;">Reset all content</button>
         </form>
       </section>
+      ` : ''}
+      ${activeTab === 'messages' ? `
+      <section>
+        <h2>Contact Messages</h2>
+        <form method="get" action="/admin" class="messages-toolbar">
+          <input type="hidden" name="tab" value="messages" />
+          <p style="margin:0;"><label>Search<br /><input type="search" name="q" value="${escapeHtml(searchQuery)}" placeholder="Name, email, phone, project, message" /></label></p>
+          <p style="margin:0;"><label>Status<br />
+            <select name="messageStatus" style="margin-top:0.35rem; border:1px solid #d1d5db; border-radius:8px; padding:0.62rem 0.75rem; background:#fff;">
+              <option value="all" ${statusFilter === 'all' ? 'selected' : ''}>All</option>
+              <option value="new" ${statusFilter === 'new' ? 'selected' : ''}>New</option>
+              <option value="seen" ${statusFilter === 'seen' ? 'selected' : ''}>Seen</option>
+            </select>
+          </label></p>
+          <p style="margin:0;"><button type="submit">Search</button></p>
+        </form>
+        <div style="overflow:auto; margin-top:1rem;">
+          <table class="messages-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Project</th>
+                <th>Message</th>
+                <th>Submitted</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>${messageRowsHtml}</tbody>
+          </table>
+        </div>
+      </section>
+      ` : ''}
     </main>
     <script>
       (function () {
@@ -552,6 +684,75 @@ app.post('/admin/content/reset', async (req, res, next) => {
 
     invalidatePageCache();
     res.redirect(303, '/admin?status=reset');
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/admin/messages/:id/status', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const id = String(req.params.id ?? '').trim();
+    const nextStatus = typeof req.body?.status === 'string' ? req.body.status.trim() : '';
+    const q = typeof req.body?.q === 'string' ? req.body.q.trim() : '';
+    const messageStatus = typeof req.body?.messageStatus === 'string' ? req.body.messageStatus.trim() : 'all';
+
+    if (!/^[a-f\d]{24}$/i.test(id) || !isMessageStatus(nextStatus)) {
+      res.redirect(303, '/admin?tab=messages&status=invalid');
+      return;
+    }
+
+    await ContactMessageModel.findByIdAndUpdate(id, { status: nextStatus });
+
+    const redirectParams = new URLSearchParams({ tab: 'messages', status: 'message-updated' });
+    if (q) {
+      redirectParams.set('q', q);
+    }
+    if (messageStatus === 'all' || isMessageStatus(messageStatus)) {
+      redirectParams.set('messageStatus', messageStatus);
+    }
+
+    res.redirect(303, `/admin?${redirectParams.toString()}`);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/admin/messages/:id/delete', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const id = String(req.params.id ?? '').trim();
+    const q = typeof req.body?.q === 'string' ? req.body.q.trim() : '';
+    const messageStatus = typeof req.body?.messageStatus === 'string' ? req.body.messageStatus.trim() : 'all';
+
+    if (!/^[a-f\d]{24}$/i.test(id)) {
+      res.redirect(303, '/admin?tab=messages&status=invalid');
+      return;
+    }
+
+    await ContactMessageModel.findByIdAndDelete(id);
+
+    const redirectParams = new URLSearchParams({ tab: 'messages', status: 'message-deleted' });
+    if (q) {
+      redirectParams.set('q', q);
+    }
+    if (messageStatus === 'all' || isMessageStatus(messageStatus)) {
+      redirectParams.set('messageStatus', messageStatus);
+    }
+
+    res.redirect(303, `/admin?${redirectParams.toString()}`);
   } catch (error) {
     next(error);
   }

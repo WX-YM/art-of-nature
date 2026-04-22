@@ -7,6 +7,7 @@ const contactMessageSchema = new mongoose.Schema(
     phone: { type: String, required: false },
     projectType: { type: String, required: true },
     message: { type: String, required: true },
+    status: { type: String, enum: ['new', 'seen'], required: true, default: 'new' },
     ipAddress: { type: String, required: false },
     userAgent: { type: String, required: false },
   },

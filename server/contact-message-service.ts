@@ -1,5 +1,6 @@
 import type { ContactMessageInput } from '../src/app/lib/contactMessage';
 import { ContactMessageModel } from './models/ContactMessage';
+import { autoForwardContactMessage } from './contact-message-forwarder';
 
 type ContactMessageMetadata = {
   ipAddress?: string;
@@ -21,4 +22,10 @@ export async function createContactMessage(
   };
 
   await ContactMessageModel.create(payload);
+
+  try {
+    await autoForwardContactMessage(input);
+  } catch (error) {
+    console.error('Failed to auto-forward contact message:', error);
+  }
 }
