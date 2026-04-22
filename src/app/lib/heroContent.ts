@@ -15,9 +15,8 @@ export const defaultHeroContent: HeroContent = {
   headingLine2: 'with Authentic Character',
   description:
     'Every piece we create is tailored to your space, handcrafted from natural materials with meticulous attention to detail and timeless design.',
-  ctaText: 'Explore Our Work',
-  ctaHref: '#work',
-  backgroundImageUrl:
-    'https://images.unsplash.com/photo-1660796334938-cf0b03be7e6d?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=2000',
-  backgroundImageAlt: 'Artisan crafting wood',
+  ctaText: 'View Gallery',
+  ctaHref: '/gallery',
+  backgroundImageUrl: '/uploads/aon%20imgaes/entry%20pictures/FB_IMG_1660169241995.jpg',
+  backgroundImageAlt: 'Interior bedroom crafted by Art of Nature',
 };

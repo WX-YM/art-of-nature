@@ -1,15 +1,21 @@
 import { Menu, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-const navigationItems = [
-  { href: '#work', label: 'Work' },
-  { href: '#about', label: 'About' },
-  { href: '#journal', label: 'Journal' },
-];
+type NavigationProps = {
+  currentPath?: string;
+};
 
-export function Navigation() {
+export function Navigation({ currentPath = '/' }: NavigationProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const isGalleryPage = currentPath === '/gallery';
+  const navigationItems = [
+    { href: '/gallery', label: 'Gallery' },
+    { href: isGalleryPage ? '/#about' : '#about', label: 'About' },
+    { href: isGalleryPage ? '/#journal' : '#journal', label: 'Journal' },
+  ];
+  const homeHref = isGalleryPage ? '/' : '#top';
+  const contactHref = isGalleryPage ? '/#contact' : '#contact';
 
   useEffect(() => {
     const handleScroll = () => {
@@ -41,7 +47,7 @@ export function Navigation() {
       }`}
     >
       <div className="section-shell flex items-center justify-between py-4 sm:py-5">
-        <a href="#top" className="min-w-0">
+        <a href={homeHref} className="min-w-0">
           <div className="text-sm font-semibold uppercase tracking-[0.35em] text-foreground/75 sm:text-base">
             Art of Nature
           </div>
@@ -54,7 +60,7 @@ export function Navigation() {
             </a>
           ))}
           <a
-            href="#contact"
+            href={contactHref}
             className="inline-flex items-center justify-center border border-primary bg-primary px-6 py-3 text-sm text-primary-foreground transition-all hover:border-accent hover:bg-accent"
           >
             Get in Touch
@@ -90,7 +96,7 @@ export function Navigation() {
             </a>
           ))}
           <a
-            href="#contact"
+            href={contactHref}
             className="mt-2 inline-flex items-center justify-center bg-primary px-5 py-4 text-center text-sm text-primary-foreground transition-colors hover:bg-accent"
             onClick={() => setIsMenuOpen(false)}
           >

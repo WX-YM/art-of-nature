@@ -2,16 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getHeroContent, upsertHeroContent } from '../server/hero-content-service';
 import { getAboutContent, upsertAboutContent } from '../server/about-content-service';
+import { getGalleryContent, upsertGalleryContent } from '../server/gallery-content-service';
 import { getContactContent, upsertContactContent } from '../server/contact-content-service';
 import { getCraftsmanshipContent, upsertCraftsmanshipContent } from '../server/craftsmanship-content-service';
 import { createContactMessage } from '../server/contact-message-service';
 import { HeroContentModel } from '../server/models/HeroContent';
 import { AboutContentModel } from '../server/models/AboutContent';
+import { GalleryContentModel } from '../server/models/GalleryContent';
 import { ContactContentModel } from '../server/models/ContactContent';
 import { CraftsmanshipContentModel } from '../server/models/CraftsmanshipContent';
 import { ContactMessageModel } from '../server/models/ContactMessage';
 import { defaultHeroContent } from '../src/app/lib/heroContent';
 import { defaultAboutContent } from '../src/app/lib/aboutContent';
+import { defaultGalleryContent } from '../src/app/lib/gallery';
 import { defaultContactContent } from '../src/app/lib/contactContent';
 import { defaultCraftsmanshipContent } from '../src/app/lib/craftsmanshipContent';
 
@@ -150,6 +153,51 @@ test('upsertAboutContent persists with fixed key and returns input', async () =>
     assert.deepEqual(saved, input);
   } finally {
     (AboutContentModel as unknown as { findOneAndUpdate: typeof AboutContentModel.findOneAndUpdate }).findOneAndUpdate =
+      originalFindOneAndUpdate;
+  }
+});
+
+test('getGalleryContent returns defaults when no document exists', async () => {
+  const originalFindOne = GalleryContentModel.findOne;
+
+  (GalleryContentModel as unknown as { findOne: () => { lean: () => Promise<unknown> } }).findOne = () => ({
+    lean: async () => null,
+  });
+
+  try {
+    const content = await getGalleryContent();
+    assert.deepEqual(content, defaultGalleryContent);
+  } finally {
+    (GalleryContentModel as unknown as { findOne: typeof GalleryContentModel.findOne }).findOne = originalFindOne;
+  }
+});
+
+test('upsertGalleryContent persists with fixed key and returns normalized input', async () => {
+  const originalFindOneAndUpdate = GalleryContentModel.findOneAndUpdate;
+
+  (GalleryContentModel as unknown as { findOneAndUpdate: (...args: unknown[]) => Promise<unknown> }).findOneAndUpdate = (
+    filter: unknown,
+    update: unknown,
+    options: unknown
+  ) => {
+    assert.deepEqual(filter, { key: 'primary-gallery' });
+    assert.deepEqual(options, { upsert: true, new: true, setDefaultsOnInsert: true });
+    assert.equal((update as { key: string }).key, 'primary-gallery');
+    return Promise.resolve(null);
+  };
+
+  const input = {
+    ...defaultGalleryContent,
+    previewHeading: 'Edited Gallery Heading',
+    pieces: defaultGalleryContent.pieces.slice(0, 2),
+  };
+
+  try {
+    const saved = await upsertGalleryContent(input);
+    assert.equal(saved.previewHeading, 'Edited Gallery Heading');
+    assert.equal(saved.pieces.length, 2);
+  } finally {
+    (GalleryContentModel as unknown as { findOneAndUpdate: typeof GalleryContentModel.findOneAndUpdate }).findOneAndUpdate =
       originalFindOneAndUpdate;
   }
 });

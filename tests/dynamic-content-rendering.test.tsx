@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderToStaticMarkup } from 'react-dom/server';
 import App from '../src/app/App';
+import { defaultGalleryContent, type GalleryContent } from '../src/app/lib/gallery';
 import { render as renderEntryServer } from '../src/entry-server';
 import type { HeroContent } from '../src/app/lib/heroContent';
 import type { AboutContent } from '../src/app/lib/aboutContent';
@@ -33,6 +34,19 @@ function createAboutContent(): AboutContent {
     processDescription: 'Process test description.',
     imageUrl: 'https://example.com/about.jpg',
     imageAlt: 'About Alt',
+  };
+}
+
+function createGalleryContent(): GalleryContent {
+  return {
+    ...defaultGalleryContent,
+    previewHeading: 'Curated Gallery Preview',
+    pageHeading: 'Dynamic Gallery Heading',
+    pieces: defaultGalleryContent.pieces.slice(0, 6).map((piece, index) => ({
+      ...piece,
+      id: `${piece.id}-${index}`,
+      featured: index < 4,
+    })),
   };
 }
 
@@ -74,6 +88,7 @@ function createContactContent(): ContactContent {
 test('App renders dynamic hero/about/contact text from props', () => {
   const heroContent = createHeroContent();
   const aboutContent = createAboutContent();
+  const galleryContent = createGalleryContent();
   const contactContent = createContactContent();
   const craftsmanshipContent = createCraftsmanshipContent();
 
@@ -81,6 +96,7 @@ test('App renders dynamic hero/about/contact text from props', () => {
     <App
       heroContent={heroContent}
       aboutContent={aboutContent}
+      galleryContent={galleryContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
     />
@@ -91,6 +107,7 @@ test('App renders dynamic hero/about/contact text from props', () => {
   assert.ok(html.includes(heroContent.headingLine2));
   assert.ok(html.includes(aboutContent.heading));
   assert.ok(html.includes(aboutContent.paragraph1));
+  assert.ok(html.includes(galleryContent.previewHeading));
   assert.ok(html.includes(contactContent.heading));
   assert.ok(html.includes(contactContent.nameLabel));
   assert.ok(html.includes(contactContent.submitText));
@@ -104,6 +121,7 @@ test('App renders dynamic hero/about/contact text from props', () => {
 test('Contact section keeps dynamic form field text and direct contacts', () => {
   const heroContent = createHeroContent();
   const aboutContent = createAboutContent();
+  const galleryContent = createGalleryContent();
   const contactContent = createContactContent();
   const craftsmanshipContent = createCraftsmanshipContent();
 
@@ -111,6 +129,7 @@ test('Contact section keeps dynamic form field text and direct contacts', () => 
     <App
       heroContent={heroContent}
       aboutContent={aboutContent}
+      galleryContent={galleryContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
     />
@@ -126,14 +145,16 @@ test('Contact section keeps dynamic form field text and direct contacts', () => 
 test('SSR entry render includes dynamic content values', () => {
   const heroContent = createHeroContent();
   const aboutContent = createAboutContent();
+  const galleryContent = createGalleryContent();
   const contactContent = createContactContent();
   const craftsmanshipContent = createCraftsmanshipContent();
 
-  const html = renderEntryServer(heroContent, aboutContent, contactContent, craftsmanshipContent);
+  const html = renderEntryServer(heroContent, aboutContent, galleryContent, contactContent, craftsmanshipContent);
 
   assert.ok(html.includes(heroContent.description));
   assert.ok(html.includes(aboutContent.paragraph2));
   assert.ok(html.includes(contactContent.description));
+  assert.ok(html.includes(galleryContent.previewHeading));
   assert.ok(html.includes(contactContent.projectOptions[1]));
   assert.ok(html.includes(craftsmanshipContent.items[1].description));
 });
@@ -145,6 +166,7 @@ test('App trims dynamic content and skips empty dynamic contact entries', () => 
   };
 
   const aboutContent = createAboutContent();
+  const galleryContent = createGalleryContent();
   const craftsmanshipContent: CraftsmanshipContent = {
     ...createCraftsmanshipContent(),
     items: [
@@ -167,6 +189,7 @@ test('App trims dynamic content and skips empty dynamic contact entries', () => 
     <App
       heroContent={heroContent}
       aboutContent={aboutContent}
+      galleryContent={galleryContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
     />
@@ -178,4 +201,23 @@ test('App trims dynamic content and skips empty dynamic contact entries', () => 
   assert.ok(html.includes('trimmed@example.com'));
   assert.ok(html.includes('Craft Trimmed'));
   assert.ok(!html.includes('Should Not Render'));
+});
+
+test('gallery route renders the editorial gallery structure', () => {
+  const html = renderToStaticMarkup(
+    <App
+      heroContent={createHeroContent()}
+      aboutContent={createAboutContent()}
+      galleryContent={createGalleryContent()}
+      contactContent={createContactContent()}
+      craftsmanshipContent={createCraftsmanshipContent()}
+      routePath="/gallery"
+    />
+  );
+
+  assert.ok(html.includes('Dynamic Gallery Heading'));
+  assert.ok(html.includes('Living Room'));
+  assert.ok(html.includes('Dining Room'));
+  assert.ok(html.includes('Collection in Progress'));
+  assert.ok(html.includes('Inquire for Details'));
 });

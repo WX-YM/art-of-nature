@@ -60,7 +60,7 @@ export function About({ content }: AboutProps) {
                   <ImageWithFallback
                     src={imageUrl}
                     alt={imageAlt || 'About image'}
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-cover object-center"
                   />
                 </div>
                 <div className="panel-surface absolute bottom-4 left-4 max-w-xs px-4 py-4 sm:bottom-6 sm:left-6">

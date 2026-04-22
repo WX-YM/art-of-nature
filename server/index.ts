@@ -6,6 +6,8 @@ import { randomBytes } from 'node:crypto';
 import { createServer as createViteServer } from 'vite';
 import { connectToDatabase } from './db';
 import { getHeroContent, upsertHeroContent } from './hero-content-service';
+import { getGalleryContent, normalizeGalleryContent, upsertGalleryContent } from './gallery-content-service';
+import { defaultGalleryContent, type GalleryContent, type GalleryPiece } from '../src/app/lib/gallery';
 import { defaultHeroContent, type HeroContent } from '../src/app/lib/heroContent';
 import { getAboutContent, upsertAboutContent } from './about-content-service';
 import { defaultAboutContent, type AboutContent } from '../src/app/lib/aboutContent';
@@ -39,7 +41,7 @@ app.use(express.json({ limit: '12mb' }));
 app.use(express.urlencoded({ extended: true, limit: '12mb' }));
 app.use('/uploads', express.static(uploadsDir));
 
-let cachedHtml: string | null = null;
+const cachedHtmlByPath = new Map<string, string>();
 const activeSessions = new Map<string, { userId: string; expiresAt: number }>();
 const pendingGoogleOAuthStates = new Map<string, {
   userId: string;
@@ -51,7 +53,7 @@ const pendingGoogleOAuthStates = new Map<string, {
 }>();
 
 function invalidatePageCache() {
-  cachedHtml = null;
+  cachedHtmlByPath.clear();
 }
 
 function createSessionTokenForUser(userId: string) {
@@ -100,6 +102,80 @@ function getGoogleOAuthRedirectUri(req: express.Request) {
   return `${req.protocol}://${req.get('host')}/admin/email/google/callback`;
 }
 
+function slugifyGalleryPieceId(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function parseGalleryPiecesJson(body: unknown): GalleryPiece[] {
+  if (!body || typeof body !== 'object') {
+    throw new Error('Invalid gallery pieces.');
+  }
+
+  const raw = (body as Record<string, unknown>).galleryPiecesJson;
+  if (typeof raw !== 'string' || raw.length > 2_000_000) {
+    throw new Error('Invalid gallery pieces.');
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('Invalid gallery pieces.');
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error('Invalid gallery pieces.');
+  }
+
+  return parsed
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return null;
+      }
+
+      const rawPiece = entry as Record<string, unknown>;
+      const title = typeof rawPiece.title === 'string' ? rawPiece.title.trim() : '';
+      const material = typeof rawPiece.material === 'string' ? rawPiece.material.trim() : '';
+      const note = typeof rawPiece.note === 'string' ? rawPiece.note.trim() : '';
+      const category = typeof rawPiece.category === 'string' ? rawPiece.category.trim() : '';
+      const subcategory = typeof rawPiece.subcategory === 'string' ? rawPiece.subcategory.trim() : '';
+      const featured = rawPiece.featured === true;
+      const imageUrls = Array.isArray(rawPiece.imageUrls)
+        ? rawPiece.imageUrls
+            .map((item) => (typeof item === 'string' ? item.trim() : ''))
+            .filter(Boolean)
+        : [];
+
+      if (!title || !material || !note || !category || !subcategory || imageUrls.length === 0) {
+        return null;
+      }
+
+      const images = imageUrls.map((src, index) => ({
+        src,
+        alt: `${title} image ${index + 1}`,
+      }));
+
+      const idSource =
+        typeof rawPiece.id === 'string' && rawPiece.id.trim()
+          ? rawPiece.id.trim()
+          : title;
+
+      return {
+        id: slugifyGalleryPieceId(idSource),
+        title,
+        category,
+        subcategory,
+        material,
+        note,
+        archiveCount: images.length,
+        featured,
+        image: images[0],
+        images,
+      } as GalleryPiece;
+    })
+    .filter((piece): piece is GalleryPiece => piece !== null);
+}
+
 import {
   parseRequiredStringField,
   parseMultilineField,
@@ -145,7 +221,8 @@ app.get('/admin', async (req, res, next) => {
     }
 
     const adminUrl = new URL(req.originalUrl, 'http://localhost');
-    const activeTab = adminUrl.searchParams.get('tab') === 'messages' ? 'messages' : 'content';
+    const requestedTab = adminUrl.searchParams.get('tab');
+    const activeTab = requestedTab === 'messages' || requestedTab === 'gallery' ? requestedTab : 'content';
     const searchQuery = adminUrl.searchParams.get('q')?.trim() ?? '';
     const messageStatusFilter = adminUrl.searchParams.get('messageStatus');
     const statusFilter = isMessageStatus(messageStatusFilter) ? messageStatusFilter : 'all';
@@ -166,11 +243,12 @@ app.get('/admin', async (req, res, next) => {
       ];
     }
 
-    const [totalVisits, totalContactMessages, hero, about, contact, craftsmanship, contactMessages, forwardingSettingsDoc] = await Promise.all([
+    const [totalVisits, totalContactMessages, hero, about, gallery, contact, craftsmanship, contactMessages, forwardingSettingsDoc] = await Promise.all([
       getVisitCount(),
       ContactMessageModel.countDocuments(),
       getHeroContent(),
       getAboutContent(),
+      getGalleryContent(),
       getContactContent(),
       getCraftsmanshipContent(),
       activeTab === 'messages'
@@ -211,10 +289,24 @@ app.get('/admin', async (req, res, next) => {
                   : status === 'gmail-disconnected'
                     ? 'Gmail forwarding disconnected.'
                     : status === 'gmail-invalid'
-                      ? 'Invalid Gmail forwarding values.'
+                        ? 'Invalid Gmail forwarding values.'
                       : status === 'gmail-failed'
                         ? 'Could not complete Gmail OAuth. Please try again.'
             : '';
+
+    const galleryEditorState = {
+      pieces: gallery.pieces.map((piece) => ({
+        id: piece.id,
+        title: piece.title,
+        category: piece.category,
+        subcategory: piece.subcategory,
+        material: piece.material,
+        note: piece.note,
+        featured: piece.featured === true,
+        imageUrls: piece.images.map((image) => image.src),
+      })),
+      categories: gallery.categories,
+    };
 
     const messageRowsHtml =
       activeTab !== 'messages'
@@ -274,40 +366,146 @@ app.get('/admin', async (req, res, next) => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard</title>
     <style>
-      body { font-family: Inter, Arial, sans-serif; margin: 0; background: #f3f4f6; color: #111827; }
-      main { max-width: 980px; margin: 2rem auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 1.5rem 1.75rem; box-shadow: 0 12px 35px rgba(17, 24, 39, 0.08); }
-      section { border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem; background: #fafafa; margin-top: 1rem; }
-      h2 { margin-top: 0; font-size: 1.1rem; }
+      :root {
+        color-scheme: light;
+        --admin-bg: #f6f1e9;
+        --admin-surface: rgba(255, 252, 247, 0.9);
+        --admin-card: #fffaf3;
+        --admin-border: rgba(88, 72, 58, 0.12);
+        --admin-border-strong: rgba(88, 72, 58, 0.18);
+        --admin-text: #312a24;
+        --admin-muted: #776a5e;
+        --admin-accent: #9a6a53;
+        --admin-accent-dark: #4b3d34;
+        --admin-shadow: 0 18px 55px rgba(52, 42, 33, 0.12);
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: "Inter", "Segoe UI", sans-serif;
+        margin: 0;
+        background:
+          radial-gradient(circle at top, rgba(177, 141, 111, 0.18), transparent 36%),
+          linear-gradient(180deg, #f7f1ea 0%, #f2ebe3 100%);
+        color: var(--admin-text);
+      }
+      main {
+        max-width: 1220px;
+        margin: 2rem auto;
+        background: var(--admin-surface);
+        border: 1px solid var(--admin-border);
+        border-radius: 28px;
+        padding: 1.75rem;
+        box-shadow: var(--admin-shadow);
+        backdrop-filter: blur(18px);
+      }
+      section {
+        border: 1px solid var(--admin-border);
+        border-radius: 22px;
+        padding: 1.2rem;
+        background: var(--admin-card);
+        margin-top: 1rem;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+      }
+      h1, h2, h3, summary strong {
+        font-family: "Georgia", "Times New Roman", serif;
+        letter-spacing: -0.02em;
+      }
+      h2 { margin-top: 0; font-size: 1.45rem; }
+      h3 { color: var(--admin-accent-dark); }
       form p { margin: 0.75rem 0; }
-      label { display: block; font-size: 0.92rem; color: #374151; }
-      input, textarea { width: 100%; margin-top: 0.35rem; border: 1px solid #d1d5db; border-radius: 8px; padding: 0.62rem 0.75rem; font: inherit; background: #fff; }
+      label { display: block; font-size: 0.92rem; color: var(--admin-muted); }
+      input, textarea, select {
+        width: 100%;
+        margin-top: 0.35rem;
+        border: 1px solid var(--admin-border-strong);
+        border-radius: 14px;
+        padding: 0.72rem 0.85rem;
+        font: inherit;
+        background: rgba(255, 255, 255, 0.9);
+        color: var(--admin-text);
+      }
       textarea { min-height: 80px; resize: vertical; }
-      button { border: none; background: #111827; color: #fff; border-radius: 8px; padding: 0.58rem 0.9rem; cursor: pointer; font-weight: 600; }
-      button:hover { opacity: 0.92; }
+      input:focus, textarea:focus, select:focus {
+        outline: 2px solid rgba(154, 106, 83, 0.18);
+        border-color: rgba(154, 106, 83, 0.42);
+      }
+      button {
+        border: none;
+        background: var(--admin-accent-dark);
+        color: #fff;
+        border-radius: 999px;
+        padding: 0.72rem 1.15rem;
+        cursor: pointer;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+      button:hover { opacity: 0.94; }
       .upload-row { display: grid; grid-template-columns: 1fr auto; gap: 0.55rem; align-items: end; }
-      .upload-help { margin-top: -0.3rem; color: #6b7280; font-size: 0.82rem; }
+      .upload-help { margin-top: -0.3rem; color: var(--admin-muted); font-size: 0.82rem; line-height: 1.6; }
       .uploads-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0.65rem; }
-      .upload-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 0.5rem; background: #fff; }
+      .upload-card { border: 1px solid var(--admin-border); border-radius: 16px; padding: 0.5rem; background: #fff; }
       .upload-card img { width: 100%; height: 120px; object-fit: cover; border-radius: 8px; background: #f3f4f6; }
-      .upload-card a { display: block; margin-top: 0.45rem; color: #1f2937; font-size: 0.8rem; word-break: break-all; text-decoration: none; }
+      .upload-card a { display: block; margin-top: 0.45rem; color: var(--admin-accent-dark); font-size: 0.8rem; word-break: break-all; text-decoration: none; }
       .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
-      .stat-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 0.8rem; background: #fff; }
-      .status-message { padding: 0.75rem 1rem; border-radius: 8px; background: #ecfeff; color: #0f766e; border: 1px solid #99f6e4; }
-      .tab-row { display: flex; gap: 0.55rem; margin-bottom: 1rem; }
-      .tab-link { display: inline-block; text-decoration: none; border: 1px solid #d1d5db; border-radius: 8px; padding: 0.45rem 0.8rem; color: #374151; background: #fff; }
-      .tab-link.active { background: #111827; border-color: #111827; color: #fff; }
+      .stat-card { border: 1px solid var(--admin-border); border-radius: 18px; padding: 1rem; background: rgba(255,255,255,0.78); }
+      .status-message { padding: 0.85rem 1rem; border-radius: 16px; background: #f3f9f5; color: #17603c; border: 1px solid rgba(23,96,60,0.16); }
+      .tab-row { display: flex; gap: 0.55rem; margin-bottom: 1rem; flex-wrap: wrap; }
+      .tab-link {
+        display: inline-flex;
+        align-items: center;
+        text-decoration: none;
+        border: 1px solid var(--admin-border-strong);
+        border-radius: 999px;
+        padding: 0.58rem 0.92rem;
+        color: var(--admin-muted);
+        background: rgba(255,255,255,0.72);
+      }
+      .tab-link.active { background: var(--admin-accent-dark); border-color: var(--admin-accent-dark); color: #fff; }
       .messages-toolbar { display: grid; grid-template-columns: 1fr auto auto; gap: 0.65rem; align-items: end; }
-      .messages-table { width: 100%; border-collapse: collapse; background: #fff; }
-      .messages-table th, .messages-table td { border: 1px solid #e5e7eb; padding: 0.65rem; vertical-align: top; text-align: left; font-size: 0.86rem; }
-      .messages-table th { background: #f9fafb; font-weight: 700; }
+      .messages-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 16px; overflow: hidden; }
+      .messages-table th, .messages-table td { border: 1px solid var(--admin-border); padding: 0.65rem; vertical-align: top; text-align: left; font-size: 0.86rem; }
+      .messages-table th { background: #f7efe4; font-weight: 700; }
+      .admin-hero { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 1rem; margin-bottom: 1.4rem; }
+      .admin-eyebrow { margin: 0 0 0.35rem 0; font-size: 0.78rem; letter-spacing: 0.32em; text-transform: uppercase; color: var(--admin-muted); }
+      .admin-intro { max-width: 40rem; color: var(--admin-muted); line-height: 1.8; }
+      .section-grid { display: grid; gap: 1rem; }
+      .section-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .gallery-category-grid { display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+      .gallery-category-card { border: 1px solid var(--admin-border); border-radius: 18px; padding: 1rem; background: rgba(255,255,255,0.74); }
+      .gallery-editor-toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between; margin: 1rem 0; }
+      .gallery-piece-editor { display: grid; gap: 0.9rem; }
+      .gallery-piece-card { border: 1px solid var(--admin-border); border-radius: 18px; background: rgba(255,255,255,0.76); overflow: hidden; }
+      .gallery-piece-card summary { list-style: none; cursor: pointer; padding: 1rem 1.1rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+      .gallery-piece-card summary::-webkit-details-marker { display: none; }
+      .gallery-piece-meta { color: var(--admin-muted); font-size: 0.82rem; letter-spacing: 0.08em; text-transform: uppercase; }
+      .gallery-piece-body { border-top: 1px solid var(--admin-border); padding: 1rem 1.1rem 1.2rem; }
+      .piece-grid { display: grid; gap: 0.85rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .piece-grid .full { grid-column: 1 / -1; }
+      .checkbox-row { display: flex; align-items: center; gap: 0.55rem; color: var(--admin-text); }
+      .checkbox-row input { width: auto; margin: 0; }
+      .ghost-button { background: rgba(255,255,255,0.88); color: var(--admin-accent-dark); border: 1px solid var(--admin-border-strong); }
+      .danger-button { background: #b0423d; }
+      .subtle-divider { margin: 1.25rem 0; border: none; border-top: 1px solid var(--admin-border); }
+      @media (max-width: 900px) {
+        main { margin: 1rem; padding: 1rem; border-radius: 22px; }
+        .section-grid.two, .piece-grid, .messages-toolbar { grid-template-columns: 1fr; }
+        .upload-row { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>
     <main>
-      <h1 style="margin-top: 0;">Hidden Dashboard</h1>
-      <p style="margin-bottom: 1.5rem; color: #4b5563;">Signed in as <strong>${safeUserName}</strong></p>
+      <div class="admin-hero">
+        <div>
+          <p class="admin-eyebrow">Art Of Nature</p>
+          <h1 style="margin: 0;">Studio Dashboard</h1>
+          <p class="admin-intro">Manage the public-facing story, gallery archive, and incoming messages from one place without changing the site’s underlying functionality.</p>
+        </div>
+        <p style="margin: 0; color: var(--admin-muted);">Signed in as <strong>${safeUserName}</strong></p>
+      </div>
       <nav class="tab-row">
         <a class="tab-link ${activeTab === 'content' ? 'active' : ''}" href="/admin?tab=content">Content</a>
+        <a class="tab-link ${activeTab === 'gallery' ? 'active' : ''}" href="/admin?tab=gallery">Gallery</a>
         <a class="tab-link ${activeTab === 'messages' ? 'active' : ''}" href="/admin?tab=messages">Contact Messages</a>
       </nav>
       ${
@@ -399,6 +597,53 @@ app.get('/admin', async (req, res, next) => {
         </form>
       </section>
       ` : ''}
+      ${activeTab === 'gallery' ? `
+      <section>
+        <p class="admin-eyebrow" style="margin-top:0;">Gallery</p>
+        <h2>Gallery Editor</h2>
+        <p class="upload-help">Edit the homepage portfolio preview, the dedicated gallery page, and each archived piece from one form. Images are saved as live URLs, so the public site updates without code changes.</p>
+        <form id="gallery-content-form" method="post" action="/admin/content/gallery">
+          <div class="section-grid two">
+            <p><label>Homepage Eyebrow<br /><input name="previewEyebrow" required value="${escapeHtml(gallery.previewEyebrow)}" /></label></p>
+            <p><label>Homepage Heading<br /><input name="previewHeading" required value="${escapeHtml(gallery.previewHeading)}" /></label></p>
+            <p class="full" style="grid-column:1 / -1;"><label>Homepage Description<br /><textarea name="previewDescription" required style="min-height:90px;">${escapeHtml(gallery.previewDescription)}</textarea></label></p>
+            <p><label>Gallery Page Eyebrow<br /><input name="pageEyebrow" required value="${escapeHtml(gallery.pageEyebrow)}" /></label></p>
+            <p><label>Gallery Page Heading<br /><input name="pageHeading" required value="${escapeHtml(gallery.pageHeading)}" /></label></p>
+            <p class="full" style="grid-column:1 / -1;"><label>Gallery Page Description<br /><textarea name="pageDescription" required style="min-height:100px;">${escapeHtml(gallery.pageDescription)}</textarea></label></p>
+          </div>
+
+          <div class="gallery-category-grid" style="margin-top:1rem;">
+            ${gallery.categories
+              .map(
+                (category) => `<div class="gallery-category-card">
+                  <p class="admin-eyebrow" style="margin-top:0;">${escapeHtml(category.name)}</p>
+                  <p><label>Eyebrow<br /><input name="galleryEyebrow:${escapeHtml(category.name)}" required value="${escapeHtml(category.eyebrow)}" /></label></p>
+                  <p><label>Description<br /><textarea name="galleryDescription:${escapeHtml(category.name)}" required style="min-height:110px;">${escapeHtml(category.description)}</textarea></label></p>
+                </div>`
+              )
+              .join('')}
+          </div>
+
+          <div class="gallery-editor-toolbar">
+            <div>
+              <strong style="display:block; margin-bottom:0.2rem;">Piece Archive</strong>
+              <span class="upload-help">Collapse the cards you are not editing. Each piece accepts one image URL per line.</span>
+            </div>
+            <button type="button" id="gallery-add-piece" class="ghost-button">Add Piece</button>
+          </div>
+
+          <textarea id="gallery-pieces-json" name="galleryPiecesJson" hidden></textarea>
+          <div id="gallery-piece-editor" class="gallery-piece-editor"></div>
+
+          <p style="margin-top:1rem;"><button type="submit">Save Gallery</button></p>
+        </form>
+      </section>
+      <section>
+        <h2>Image Library</h2>
+        <p class="upload-help" id="upload-status">Upload a new image or reuse an existing URL from the archive below when editing a gallery piece.</p>
+        <div id="uploads-list" class="uploads-list"></div>
+      </section>
+      ` : ''}
       ${activeTab === 'messages' ? `
       <section>
         <h2>Contact Messages</h2>
@@ -455,6 +700,150 @@ app.get('/admin', async (req, res, next) => {
       (function () {
         const statusEl = document.getElementById('upload-status');
         const uploadsListEl = document.getElementById('uploads-list');
+        const galleryEditorData = ${serializeForScript(galleryEditorState)};
+        const galleryEditorEl = document.getElementById('gallery-piece-editor');
+        const galleryAddPieceButton = document.getElementById('gallery-add-piece');
+        const galleryForm = document.getElementById('gallery-content-form');
+        const galleryPiecesJsonField = document.getElementById('gallery-pieces-json');
+        const galleryCategories = Array.isArray(galleryEditorData && galleryEditorData.categories)
+          ? galleryEditorData.categories
+          : [];
+
+        function escapeHtmlValue(value) {
+          return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        }
+
+        function slugifyPieceId(value) {
+          return String(value || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-|-$/g, '');
+        }
+
+        function getCategoryConfig(categoryName) {
+          return galleryCategories.find(function (category) {
+            return category && category.name === categoryName;
+          }) || galleryCategories[0] || null;
+        }
+
+        function getSubcategoryOptions(categoryName, selectedValue) {
+          const category = getCategoryConfig(categoryName);
+          const subcategories = category && Array.isArray(category.subcategories) ? category.subcategories : [];
+
+          return subcategories
+            .map(function (subcategory) {
+              const selected = subcategory === selectedValue ? 'selected' : '';
+              return '<option value="' + escapeHtmlValue(subcategory) + '" ' + selected + '>' + escapeHtmlValue(subcategory) + '</option>';
+            })
+            .join('');
+        }
+
+        function categoryOptionsMarkup(selectedValue) {
+          return galleryCategories
+            .map(function (category) {
+              const selected = category.name === selectedValue ? 'selected' : '';
+              return '<option value="' + escapeHtmlValue(category.name) + '" ' + selected + '>' + escapeHtmlValue(category.name) + '</option>';
+            })
+            .join('');
+        }
+
+        function normalizeEditorPiece(piece) {
+          const fallbackCategory = galleryCategories[0] || { name: 'Living Room', subcategories: ['Tables'] };
+          const category = getCategoryConfig(piece && piece.category) || fallbackCategory;
+          const imageUrls = Array.isArray(piece && piece.imageUrls)
+            ? piece.imageUrls.map(function (url) { return String(url || '').trim(); }).filter(Boolean)
+            : [];
+
+          return {
+            id: typeof (piece && piece.id) === 'string' ? piece.id.trim() : '',
+            title: typeof (piece && piece.title) === 'string' ? piece.title.trim() : '',
+            category: category.name,
+            subcategory:
+              typeof (piece && piece.subcategory) === 'string' && category.subcategories.includes(piece.subcategory)
+                ? piece.subcategory
+                : category.subcategories[0],
+            material: typeof (piece && piece.material) === 'string' ? piece.material.trim() : '',
+            note: typeof (piece && piece.note) === 'string' ? piece.note.trim() : '',
+            featured: piece && piece.featured === true,
+            imageUrls: imageUrls,
+          };
+        }
+
+        function readPiecesFromDom() {
+          if (!galleryEditorEl) return [];
+
+          return Array.from(galleryEditorEl.querySelectorAll('[data-piece-card]'))
+            .map(function (card) {
+              const title = card.querySelector('[data-field="title"]');
+              const category = card.querySelector('[data-field="category"]');
+              const subcategory = card.querySelector('[data-field="subcategory"]');
+              const material = card.querySelector('[data-field="material"]');
+              const note = card.querySelector('[data-field="note"]');
+              const featured = card.querySelector('[data-field="featured"]');
+              const imageUrls = card.querySelector('[data-field="imageUrls"]');
+              const idInput = card.querySelector('[data-field="id"]');
+
+              const normalized = normalizeEditorPiece({
+                id: idInput && typeof idInput.value === 'string' ? idInput.value.trim() : '',
+                title: title && typeof title.value === 'string' ? title.value.trim() : '',
+                category: category && typeof category.value === 'string' ? category.value.trim() : '',
+                subcategory: subcategory && typeof subcategory.value === 'string' ? subcategory.value.trim() : '',
+                material: material && typeof material.value === 'string' ? material.value.trim() : '',
+                note: note && typeof note.value === 'string' ? note.value.trim() : '',
+                featured: Boolean(featured && featured.checked),
+                imageUrls:
+                  imageUrls && typeof imageUrls.value === 'string'
+                    ? imageUrls.value.split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean)
+                    : [],
+              });
+
+              normalized.id = normalized.id || slugifyPieceId(normalized.title);
+              return normalized;
+            })
+            .filter(function (piece) {
+              return piece.title || piece.material || piece.note || piece.imageUrls.length > 0;
+            });
+        }
+
+        function renderGalleryEditor(pieces) {
+          if (!galleryEditorEl) return;
+
+          galleryEditorEl.innerHTML = pieces
+            .map(function (piece, index) {
+              const normalized = normalizeEditorPiece(piece);
+              const imageCount = normalized.imageUrls.length;
+              const summaryTitle = normalized.title || 'Untitled piece';
+              const summaryMeta = normalized.category + ' / ' + normalized.subcategory + ' / ' + imageCount + ' image' + (imageCount === 1 ? '' : 's');
+
+              return '<details class="gallery-piece-card" data-piece-card open="' + (index < 2 ? 'open' : '') + '">' +
+                '<summary>' +
+                  '<div>' +
+                    '<strong>' + escapeHtmlValue(summaryTitle) + '</strong>' +
+                    '<div class="gallery-piece-meta">' + escapeHtmlValue(summaryMeta) + (normalized.featured ? ' / featured' : '') + '</div>' +
+                  '</div>' +
+                  '<button type="button" class="danger-button" data-remove-piece="' + index + '">Remove</button>' +
+                '</summary>' +
+                '<div class="gallery-piece-body">' +
+                  '<div class="piece-grid">' +
+                    '<input type="hidden" data-field="id" value="' + escapeHtmlValue(normalized.id) + '" />' +
+                    '<p><label>Title<br /><input data-field="title" value="' + escapeHtmlValue(normalized.title) + '" /></label></p>' +
+                    '<p><label>Material<br /><input data-field="material" value="' + escapeHtmlValue(normalized.material) + '" /></label></p>' +
+                    '<p><label>Category<br /><select data-field="category">' + categoryOptionsMarkup(normalized.category) + '</select></label></p>' +
+                    '<p><label>Subcategory<br /><select data-field="subcategory">' + getSubcategoryOptions(normalized.category, normalized.subcategory) + '</select></label></p>' +
+                    '<p class="full"><label>Note<br /><textarea data-field="note" style="min-height:120px;">' + escapeHtmlValue(normalized.note) + '</textarea></label></p>' +
+                    '<p class="full"><label>Image URLs (one per line)<br /><textarea data-field="imageUrls" style="min-height:150px;">' + escapeHtmlValue(normalized.imageUrls.join('\\n')) + '</textarea></label></p>' +
+                    '<p class="full"><label class="checkbox-row"><input type="checkbox" data-field="featured" ' + (normalized.featured ? 'checked' : '') + ' /> Featured on homepage portfolio section</label></p>' +
+                  '</div>' +
+                '</div>' +
+              '</details>';
+            })
+            .join('');
+        }
 
         function setStatus(message, isError) {
           if (!statusEl) return;
@@ -478,7 +867,7 @@ app.get('/admin', async (req, res, next) => {
             }
 
             uploadsListEl.innerHTML = uploads
-              .slice(0, 24)
+              .slice(0, 60)
               .map(function (item) {
                 const safeUrl = String(item.url || '');
                 return '<div class="upload-card">' +
@@ -554,6 +943,61 @@ app.get('/admin', async (req, res, next) => {
             }
           });
         });
+
+        if (galleryEditorEl && galleryForm && galleryPiecesJsonField) {
+          renderGalleryEditor(galleryEditorData && Array.isArray(galleryEditorData.pieces) ? galleryEditorData.pieces : []);
+
+          galleryEditorEl.addEventListener('click', function (event) {
+            const removeButton = event.target.closest('[data-remove-piece]');
+            if (!removeButton) return;
+
+            event.preventDefault();
+            const index = Number(removeButton.getAttribute('data-remove-piece'));
+            const nextPieces = readPiecesFromDom().filter(function (_piece, pieceIndex) {
+              return pieceIndex !== index;
+            });
+            renderGalleryEditor(nextPieces);
+          });
+
+          galleryEditorEl.addEventListener('change', function (event) {
+            const target = event.target;
+            if (!(target instanceof HTMLSelectElement) || target.getAttribute('data-field') !== 'category') {
+              return;
+            }
+
+            const card = target.closest('[data-piece-card]');
+            const subcategorySelect = card && card.querySelector('[data-field="subcategory"]');
+            if (!(subcategorySelect instanceof HTMLSelectElement)) {
+              return;
+            }
+
+            const category = getCategoryConfig(target.value);
+            const nextSubcategory = category && Array.isArray(category.subcategories) ? category.subcategories[0] : '';
+            subcategorySelect.innerHTML = getSubcategoryOptions(target.value, nextSubcategory);
+          });
+
+          if (galleryAddPieceButton) {
+            galleryAddPieceButton.addEventListener('click', function () {
+              const nextPieces = readPiecesFromDom();
+              const fallbackCategory = galleryCategories[0] || { name: 'Living Room', subcategories: ['Tables'] };
+              nextPieces.push({
+                id: '',
+                title: '',
+                category: fallbackCategory.name,
+                subcategory: fallbackCategory.subcategories[0],
+                material: '',
+                note: '',
+                featured: false,
+                imageUrls: [],
+              });
+              renderGalleryEditor(nextPieces);
+            });
+          }
+
+          galleryForm.addEventListener('submit', function () {
+            galleryPiecesJsonField.value = JSON.stringify(readPiecesFromDom());
+          });
+        }
 
         refreshUploads();
       })();
@@ -785,6 +1229,51 @@ app.post('/admin/content/about', async (req, res, next) => {
   }
 });
 
+app.post('/admin/content/gallery', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const pieces = parseGalleryPiecesJson(req.body);
+
+    if (pieces.length === 0) {
+      res.redirect(303, '/admin?tab=gallery&status=invalid');
+      return;
+    }
+
+    const content: GalleryContent = normalizeGalleryContent({
+      previewEyebrow: parseRequiredStringField(req.body, 'previewEyebrow', 120),
+      previewHeading: parseRequiredStringField(req.body, 'previewHeading', 200),
+      previewDescription: parseRequiredStringField(req.body, 'previewDescription', 2000),
+      pageEyebrow: parseRequiredStringField(req.body, 'pageEyebrow', 120),
+      pageHeading: parseRequiredStringField(req.body, 'pageHeading', 220),
+      pageDescription: parseRequiredStringField(req.body, 'pageDescription', 3000),
+      categories: defaultGalleryContent.categories.map((category) => ({
+        name: category.name,
+        eyebrow: parseRequiredStringField(req.body, `galleryEyebrow:${category.name}`, 120),
+        description: parseRequiredStringField(req.body, `galleryDescription:${category.name}`, 3000),
+        subcategories: category.subcategories,
+      })),
+      pieces,
+    });
+
+    await upsertGalleryContent(content);
+    invalidatePageCache();
+    res.redirect(303, '/admin?tab=gallery&status=saved');
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Invalid')) {
+      res.redirect(303, '/admin?tab=gallery&status=invalid');
+      return;
+    }
+
+    next(error);
+  }
+});
+
 app.post('/admin/content/contact', async (req, res, next) => {
   try {
     const user = await getAuthenticatedUser(req);
@@ -881,6 +1370,7 @@ app.post('/admin/content/reset', async (req, res, next) => {
     await Promise.all([
       upsertHeroContent(defaultHeroContent),
       upsertAboutContent(defaultAboutContent),
+      upsertGalleryContent(defaultGalleryContent),
       upsertContactContent(defaultContactContent),
       upsertCraftsmanshipContent(defaultCraftsmanshipContent),
     ]);
@@ -1005,6 +1495,15 @@ app.get('/api/about', async (_req, res, next) => {
   }
 });
 
+app.get('/api/gallery', async (_req, res, next) => {
+  try {
+    const gallery = await getGalleryContent();
+    res.json(gallery);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/contact', async (_req, res, next) => {
   try {
     const contact = await getContactContent();
@@ -1099,6 +1598,22 @@ app.put('/api/about', async (req, res, next) => {
   }
 });
 
+app.put('/api/gallery', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const saved = await upsertGalleryContent(req.body);
+    invalidatePageCache();
+    res.json(saved);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.put('/api/hero', async (req, res, next) => {
   try {
     const user = await getAuthenticatedUser(req);
@@ -1176,6 +1691,9 @@ app.use(vite.middlewares);
 
 app.get('*', async (req, res, next) => {
   try {
+    const cacheKey = req.path;
+    const cachedHtml = cachedHtmlByPath.get(cacheKey);
+
     if (cachedHtml) {
       res.status(200).set({ 'Content-Type': 'text/html' }).end(cachedHtml);
       return;
@@ -1189,14 +1707,15 @@ app.get('*', async (req, res, next) => {
     const { render } = await vite.ssrLoadModule('/src/entry-server.tsx');
     const heroContent = await getHeroContent();
     const aboutContent = await getAboutContent();
+    const galleryContent = await getGalleryContent();
     const contactContent = await getContactContent();
     const craftsmanshipContent = await getCraftsmanshipContent();
-    const appHtml = render(heroContent, aboutContent, contactContent, craftsmanshipContent);
+    const appHtml = render(heroContent, aboutContent, galleryContent, contactContent, craftsmanshipContent, req.path);
 
-    const initialDataScript = `<script>window.__INITIAL_HERO__=${serializeForScript(heroContent)};window.__INITIAL_ABOUT__=${serializeForScript(aboutContent)};window.__INITIAL_CONTACT__=${serializeForScript(contactContent)};window.__INITIAL_CRAFTSMANSHIP__=${serializeForScript(craftsmanshipContent)}</script>`;
+    const initialDataScript = `<script>window.__INITIAL_HERO__=${serializeForScript(heroContent)};window.__INITIAL_ABOUT__=${serializeForScript(aboutContent)};window.__INITIAL_GALLERY__=${serializeForScript(galleryContent)};window.__INITIAL_CONTACT__=${serializeForScript(contactContent)};window.__INITIAL_CRAFTSMANSHIP__=${serializeForScript(craftsmanshipContent)}</script>`;
     const html = template.replace('<div id="root"></div>', `<div id="root">${appHtml}</div>${initialDataScript}`);
 
-    cachedHtml = html;
+    cachedHtmlByPath.set(cacheKey, html);
 
     res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
   } catch (error) {

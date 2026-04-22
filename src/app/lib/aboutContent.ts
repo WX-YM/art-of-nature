@@ -26,7 +26,6 @@ export const defaultAboutContent: AboutContent = {
   ],
   processEyebrow: 'Process',
   processDescription: 'Every project is shaped around proportion, material, and the atmosphere you want a room to hold.',
-  imageUrl:
-    'https://images.unsplash.com/photo-1722411927625-0e478acf502b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1200',
-  imageAlt: 'Artisan working on wood piece',
+  imageUrl: '/uploads/aon%20imgaes/owner%20pic/0D2A6365.JPG',
+  imageAlt: 'Portrait of the Art of Nature founder',
 };

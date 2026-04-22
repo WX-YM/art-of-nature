@@ -51,21 +51,36 @@ export async function saveUploadedImage(body: unknown, targetDir: string = uploa
 
 export async function listUploads(targetDir: string = uploadsDir) {
   await mkdir(targetDir, { recursive: true });
-  const names = await readdir(targetDir);
+  const files: Array<{ name: string; url: string; size: number; uploadedAt: string }> = [];
 
-  const files = await Promise.all(
-    names.map(async (name) => {
-      const fullPath = path.resolve(targetDir, name);
-      const fileStats = await stat(fullPath);
+  async function walk(currentDir: string, relativeDir: string = ''): Promise<void> {
+    const names = await readdir(currentDir);
 
-      return {
-        name,
-        url: `/uploads/${name}`,
-        size: fileStats.size,
-        uploadedAt: fileStats.mtime.toISOString(),
-      };
-    })
-  );
+    await Promise.all(
+      names.map(async (name) => {
+        const fullPath = path.resolve(currentDir, name);
+        const fileStats = await stat(fullPath);
+        const relativePath = relativeDir ? `${relativeDir}/${name}` : name;
+
+        if (fileStats.isDirectory()) {
+          await walk(fullPath, relativePath);
+          return;
+        }
+
+        files.push({
+          name: relativePath,
+          url: `/uploads/${relativePath
+            .split('/')
+            .map((segment) => encodeURIComponent(segment))
+            .join('/')}`,
+          size: fileStats.size,
+          uploadedAt: fileStats.mtime.toISOString(),
+        });
+      })
+    );
+  }
+
+  await walk(targetDir);
 
   return files.sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1));
 }

@@ -5,21 +5,21 @@ const articles = [
     title: 'The Art of Wood Selection',
     excerpt: 'How we choose timber for each project, considering grain patterns, durability, and character.',
     date: 'April 15, 2026',
-    image: 'https://images.unsplash.com/photo-1763392199096-6efd9d28d8cc?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=800',
+    image: '/uploads/aon%20imgaes/coffee%20tables/olive%20wood%20with%20resin%20coffee%20table/0D2A1120.jpg',
     category: 'Materials'
   },
   {
     title: 'Designing for Longevity',
     excerpt: 'Creating furniture that transcends trends and becomes part of your home\'s story.',
     date: 'April 8, 2026',
-    image: 'https://images.unsplash.com/photo-1607073297082-07da3b1014dd?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=800',
+    image: '/uploads/aon%20imgaes/entry%20pictures/FB_IMG_1660169263115.jpg',
     category: 'Philosophy'
   },
   {
     title: 'Traditional Joinery Methods',
     excerpt: 'Exploring mortise and tenon, dovetails, and other time-honored woodworking techniques.',
     date: 'March 28, 2026',
-    image: 'https://images.unsplash.com/photo-1761544775976-0c81b00e81d3?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=800',
+    image: '/uploads/aon%20imgaes/lighting/chandlier%20from%20tree%20rings%20with%20live%20edges/544A0007.jpg',
     category: 'Technique'
   }
 ];
@@ -35,7 +35,7 @@ export function BlogPreview() {
               Journal
             </h2>
           </div>
-          <a href="#" className="hover:text-accent transition-colors">View All Articles →</a>
+          <a href="/gallery" className="hover:text-accent transition-colors">View Gallery →</a>
         </div>
 
         <div className="grid md:grid-cols-3 gap-12">
