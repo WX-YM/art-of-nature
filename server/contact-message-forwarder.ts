@@ -1,7 +1,8 @@
 import nodemailer from 'nodemailer';
 import type { ContactMessageInput } from '../src/app/lib/contactMessage';
+import { ForwardingSettingsModel } from './models/ForwardingSettings';
 
-type MailTransportConfig = {
+type SmtpTransportConfig = {
   host: string;
   port: number;
   secure: boolean;
@@ -11,45 +12,8 @@ type MailTransportConfig = {
   to: string;
 };
 
-let cachedTransportConfig: MailTransportConfig | null | undefined;
-let cachedTransporter: nodemailer.Transporter | null = null;
-
-function readTransportConfig(): MailTransportConfig | null {
-  if (cachedTransportConfig !== undefined) {
-    return cachedTransportConfig;
-  }
-
-  const to = process.env.CONTACT_FORWARD_TO_EMAIL?.trim();
-  const host = process.env.SMTP_HOST?.trim();
-  const from = (process.env.SMTP_FROM_EMAIL ?? process.env.SMTP_USER)?.trim();
-
-  if (!to || !host || !from) {
-    cachedTransportConfig = null;
-    return cachedTransportConfig;
-  }
-
-  const port = Number(process.env.SMTP_PORT ?? 587);
-  const secure = (process.env.SMTP_SECURE ?? '').toLowerCase() === 'true' || port === 465;
-
-  cachedTransportConfig = {
-    host,
-    port,
-    secure,
-    user: process.env.SMTP_USER?.trim(),
-    pass: process.env.SMTP_PASS,
-    from,
-    to,
-  };
-
-  return cachedTransportConfig;
-}
-
-function getTransporter(config: MailTransportConfig) {
-  if (cachedTransporter) {
-    return cachedTransporter;
-  }
-
-  cachedTransporter = nodemailer.createTransport({
+function createSmtpTransporter(config: SmtpTransportConfig) {
+  return nodemailer.createTransport({
     host: config.host,
     port: config.port,
     secure: config.secure,
@@ -60,8 +24,68 @@ function getTransporter(config: MailTransportConfig) {
         }
       : undefined,
   });
+}
 
-  return cachedTransporter;
+function readEnvironmentTransportConfig(): SmtpTransportConfig | null {
+  const to = process.env.CONTACT_FORWARD_TO_EMAIL?.trim();
+  const host = process.env.SMTP_HOST?.trim();
+  const from = (process.env.SMTP_FROM_EMAIL ?? process.env.SMTP_USER)?.trim();
+
+  if (!to || !host || !from) {
+    return null;
+  }
+
+  const port = Number(process.env.SMTP_PORT ?? 587);
+  const secure = (process.env.SMTP_SECURE ?? '').toLowerCase() === 'true' || port === 465;
+
+  return {
+    host,
+    port,
+    secure,
+    user: process.env.SMTP_USER?.trim(),
+    pass: process.env.SMTP_PASS,
+    from,
+    to,
+  };
+}
+
+async function sendWithGmailOAuth(message: ContactMessageInput) {
+  const settings = await ForwardingSettingsModel.findOne<{ enabled?: boolean; forwardToEmail?: string; gmailAddress?: string; googleClientId?: string; googleClientSecret?: string; googleRefreshToken?: string }>({ key: 'contact-forwarding' }).lean();
+
+  if (!settings?.enabled) {
+    return false;
+  }
+
+  const forwardToEmail = settings.forwardToEmail?.trim();
+  const gmailAddress = settings.gmailAddress?.trim();
+  const googleClientId = settings.googleClientId?.trim();
+  const googleClientSecret = settings.googleClientSecret?.trim();
+  const googleRefreshToken = settings.googleRefreshToken?.trim();
+
+  if (!forwardToEmail || !gmailAddress || !googleClientId || !googleClientSecret || !googleRefreshToken) {
+    return false;
+  }
+
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      type: 'OAuth2',
+      user: gmailAddress,
+      clientId: googleClientId,
+      clientSecret: googleClientSecret,
+      refreshToken: googleRefreshToken,
+    },
+  });
+
+  await transporter.sendMail({
+    from: gmailAddress,
+    to: forwardToEmail,
+    subject: `New contact message from ${message.name}`,
+    text: buildForwardedText(message),
+    replyTo: message.email,
+  });
+
+  return true;
 }
 
 function buildForwardedText(message: ContactMessageInput) {
@@ -79,13 +103,22 @@ function buildForwardedText(message: ContactMessageInput) {
 }
 
 export async function autoForwardContactMessage(message: ContactMessageInput) {
-  const config = readTransportConfig();
+  if (process.env.NODE_ENV === 'test' || process.argv.includes('--test')) {
+    return;
+  }
+
+  const sentByGmailOAuth = await sendWithGmailOAuth(message);
+  if (sentByGmailOAuth) {
+    return;
+  }
+
+  const config = readEnvironmentTransportConfig();
 
   if (!config) {
     return;
   }
 
-  const transporter = getTransporter(config);
+  const transporter = createSmtpTransporter(config);
 
   await transporter.sendMail({
     from: config.from,

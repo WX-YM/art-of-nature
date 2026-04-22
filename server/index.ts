@@ -17,6 +17,7 @@ import { createContactMessage } from './contact-message-service';
 import { getVisitCount, incrementVisitCount } from './site-visit-service';
 import { ContactMessageModel } from './models/ContactMessage';
 import { UserModel } from './models/User';
+import { ForwardingSettingsModel } from './models/ForwardingSettings';
 import {
   createIpRateLimiter,
   escapeHtml,
@@ -40,6 +41,14 @@ app.use('/uploads', express.static(uploadsDir));
 
 let cachedHtml: string | null = null;
 const activeSessions = new Map<string, { userId: string; expiresAt: number }>();
+const pendingGoogleOAuthStates = new Map<string, {
+  userId: string;
+  expiresAt: number;
+  forwardToEmail: string;
+  gmailAddress: string;
+  googleClientId: string;
+  googleClientSecret: string;
+}>();
 
 function invalidatePageCache() {
   cachedHtml = null;
@@ -81,6 +90,14 @@ function escapeRegex(value: string) {
 
 function isMessageStatus(value: unknown): value is 'new' | 'seen' {
   return value === 'new' || value === 'seen';
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function getGoogleOAuthRedirectUri(req: express.Request) {
+  return `${req.protocol}://${req.get('host')}/admin/email/google/callback`;
 }
 
 import {
@@ -149,7 +166,7 @@ app.get('/admin', async (req, res, next) => {
       ];
     }
 
-    const [totalVisits, totalContactMessages, hero, about, contact, craftsmanship, contactMessages] = await Promise.all([
+    const [totalVisits, totalContactMessages, hero, about, contact, craftsmanship, contactMessages, forwardingSettingsDoc] = await Promise.all([
       getVisitCount(),
       ContactMessageModel.countDocuments(),
       getHeroContent(),
@@ -159,7 +176,23 @@ app.get('/admin', async (req, res, next) => {
       activeTab === 'messages'
         ? ContactMessageModel.find(messageQuery).sort({ createdAt: -1 }).limit(200).lean()
         : Promise.resolve([]),
+      ForwardingSettingsModel.findOne<{
+        enabled?: boolean;
+        forwardToEmail?: string;
+        gmailAddress?: string;
+        googleClientId?: string;
+        googleClientSecret?: string;
+        googleRefreshToken?: string;
+      }>({ key: 'contact-forwarding' }).lean(),
     ]);
+    const forwardingSettings = {
+      enabled: forwardingSettingsDoc?.enabled === true,
+      forwardToEmail: forwardingSettingsDoc?.forwardToEmail ?? '',
+      gmailAddress: forwardingSettingsDoc?.gmailAddress ?? '',
+      googleClientId: forwardingSettingsDoc?.googleClientId ?? '',
+      googleClientSecret: forwardingSettingsDoc?.googleClientSecret ?? '',
+      connected: Boolean(forwardingSettingsDoc?.googleRefreshToken),
+    };
     const safeUserName = escapeHtml(user.user);
     const status = adminUrl.searchParams.get('status');
     const statusMessage =
@@ -173,6 +206,14 @@ app.get('/admin', async (req, res, next) => {
               ? 'Message status updated.'
               : status === 'message-deleted'
                 ? 'Message deleted.'
+                : status === 'gmail-connected'
+                  ? 'Gmail forwarding connected successfully.'
+                  : status === 'gmail-disconnected'
+                    ? 'Gmail forwarding disconnected.'
+                    : status === 'gmail-invalid'
+                      ? 'Invalid Gmail forwarding values.'
+                      : status === 'gmail-failed'
+                        ? 'Could not complete Gmail OAuth. Please try again.'
             : '';
 
     const messageRowsHtml =
@@ -361,6 +402,23 @@ app.get('/admin', async (req, res, next) => {
       ${activeTab === 'messages' ? `
       <section>
         <h2>Contact Messages</h2>
+        <form method="post" action="/admin/email/google/connect" style="margin-bottom:1rem; border:1px solid #e5e7eb; border-radius:10px; padding:0.9rem; background:#fff;">
+          <h3 style="margin-top:0; margin-bottom:0.7rem; font-size:0.98rem;">Auto-forward using Gmail OAuth</h3>
+          <p class="upload-help" style="margin-top:0; margin-bottom:0.8rem;">Connect a Gmail account once, then contact messages are auto-forwarded without server SMTP config changes.</p>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:0.65rem;">
+            <p style="margin:0;"><label>Forward To Email<br /><input name="forwardToEmail" required value="${escapeHtml(forwardingSettings.forwardToEmail)}" placeholder="inbox@example.com" /></label></p>
+            <p style="margin:0;"><label>Gmail Address<br /><input name="gmailAddress" required value="${escapeHtml(forwardingSettings.gmailAddress)}" placeholder="your@gmail.com" /></label></p>
+            <p style="margin:0;"><label>Google OAuth Client ID<br /><input name="googleClientId" required value="${escapeHtml(forwardingSettings.googleClientId)}" placeholder="...apps.googleusercontent.com" /></label></p>
+            <p style="margin:0;"><label>Google OAuth Client Secret<br /><input name="googleClientSecret" required value="${escapeHtml(forwardingSettings.googleClientSecret)}" placeholder="GOCSPX-..." /></label></p>
+          </div>
+          <p style="margin:0.8rem 0 0 0; display:flex; gap:0.55rem; flex-wrap:wrap; align-items:center;">
+            <button type="submit" style="background:#111827;">${forwardingSettings.connected ? 'Reconnect Gmail' : 'Connect Gmail'}</button>
+            <span style="font-size:0.84rem; color:${forwardingSettings.connected ? '#166534' : '#6b7280'};">${forwardingSettings.connected ? 'Connected' : 'Not connected'}</span>
+          </p>
+        </form>
+        <form method="post" action="/admin/email/google/disconnect" style="margin-bottom:1rem;">
+          <button type="submit" style="background:#b91c1c;" ${forwardingSettings.connected ? '' : 'disabled'}>Disconnect Gmail Forwarding</button>
+        </form>
         <form method="get" action="/admin" class="messages-toolbar">
           <input type="hidden" name="tab" value="messages" />
           <p style="margin:0;"><label>Search<br /><input type="search" name="q" value="${escapeHtml(searchQuery)}" placeholder="Name, email, phone, project, message" /></label></p>
@@ -502,6 +560,151 @@ app.get('/admin', async (req, res, next) => {
     </script>
   </body>
 </html>`);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/admin/email/google/connect', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const forwardToEmail = typeof req.body?.forwardToEmail === 'string' ? req.body.forwardToEmail.trim() : '';
+    const gmailAddress = typeof req.body?.gmailAddress === 'string' ? req.body.gmailAddress.trim() : '';
+    const googleClientId = typeof req.body?.googleClientId === 'string' ? req.body.googleClientId.trim() : '';
+    const googleClientSecret = typeof req.body?.googleClientSecret === 'string' ? req.body.googleClientSecret.trim() : '';
+
+    if (
+      !forwardToEmail ||
+      !gmailAddress ||
+      !googleClientId ||
+      !googleClientSecret ||
+      !isValidEmail(forwardToEmail) ||
+      !isValidEmail(gmailAddress) ||
+      googleClientId.length > 500 ||
+      googleClientSecret.length > 300
+    ) {
+      res.redirect(303, '/admin?tab=messages&status=gmail-invalid');
+      return;
+    }
+
+    const state = randomBytes(24).toString('hex');
+    pendingGoogleOAuthStates.set(state, {
+      userId: String((user as { _id?: unknown })._id ?? ''),
+      expiresAt: Date.now() + 1000 * 60 * 10,
+      forwardToEmail,
+      gmailAddress,
+      googleClientId,
+      googleClientSecret,
+    });
+
+    const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    googleAuthUrl.searchParams.set('client_id', googleClientId);
+    googleAuthUrl.searchParams.set('redirect_uri', getGoogleOAuthRedirectUri(req));
+    googleAuthUrl.searchParams.set('response_type', 'code');
+    googleAuthUrl.searchParams.set('scope', 'https://mail.google.com/');
+    googleAuthUrl.searchParams.set('access_type', 'offline');
+    googleAuthUrl.searchParams.set('prompt', 'consent');
+    googleAuthUrl.searchParams.set('state', state);
+
+    res.redirect(303, googleAuthUrl.toString());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/admin/email/google/callback', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const state = typeof req.query?.state === 'string' ? req.query.state : '';
+    const code = typeof req.query?.code === 'string' ? req.query.code : '';
+    const pending = pendingGoogleOAuthStates.get(state);
+    pendingGoogleOAuthStates.delete(state);
+
+    if (!pending || pending.expiresAt <= Date.now() || pending.userId !== String((user as { _id?: unknown })._id ?? '') || !code) {
+      res.redirect(303, '/admin?tab=messages&status=gmail-failed');
+      return;
+    }
+
+    const tokenRequest = new URLSearchParams({
+      code,
+      client_id: pending.googleClientId,
+      client_secret: pending.googleClientSecret,
+      redirect_uri: getGoogleOAuthRedirectUri(req),
+      grant_type: 'authorization_code',
+    });
+
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: tokenRequest,
+    });
+
+    if (!tokenResponse.ok) {
+      res.redirect(303, '/admin?tab=messages&status=gmail-failed');
+      return;
+    }
+
+    const tokenPayload = (await tokenResponse.json()) as { refresh_token?: string };
+    const refreshToken = tokenPayload.refresh_token?.trim();
+
+    if (!refreshToken) {
+      res.redirect(303, '/admin?tab=messages&status=gmail-failed');
+      return;
+    }
+
+    await ForwardingSettingsModel.findOneAndUpdate(
+      { key: 'contact-forwarding' },
+      {
+        key: 'contact-forwarding',
+        enabled: true,
+        provider: 'gmail_oauth',
+        forwardToEmail: pending.forwardToEmail,
+        gmailAddress: pending.gmailAddress,
+        googleClientId: pending.googleClientId,
+        googleClientSecret: pending.googleClientSecret,
+        googleRefreshToken: refreshToken,
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    res.redirect(303, '/admin?tab=messages&status=gmail-connected');
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/admin/email/google/disconnect', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    await ForwardingSettingsModel.findOneAndUpdate(
+      { key: 'contact-forwarding' },
+      {
+        key: 'contact-forwarding',
+        enabled: false,
+        googleRefreshToken: '',
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    res.redirect(303, '/admin?tab=messages&status=gmail-disconnected');
   } catch (error) {
     next(error);
   }
