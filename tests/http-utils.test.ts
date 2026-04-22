@@ -69,7 +69,7 @@ test('isAuthorizedForInvalidation enforces token only when configured', () => {
   const previous = process.env.CACHE_INVALIDATE_TOKEN;
 
   delete process.env.CACHE_INVALIDATE_TOKEN;
-  assert.equal(isAuthorizedForInvalidation(undefined), true);
+  assert.equal(isAuthorizedForInvalidation(undefined), false);
 
   process.env.CACHE_INVALIDATE_TOKEN = 'token-1';
   assert.equal(isAuthorizedForInvalidation('token-1'), true);

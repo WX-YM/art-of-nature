@@ -141,7 +141,7 @@ export function isAuthorizedForInvalidation(requestToken: string | undefined) {
   const expectedToken = process.env.CACHE_INVALIDATE_TOKEN;
 
   if (!expectedToken) {
-    return true;
+    return false; // Secure by default
   }
 
   return requestToken === expectedToken;

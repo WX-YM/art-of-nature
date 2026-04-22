@@ -758,9 +758,12 @@ app.post('/api/cache/invalidate', (req, res) => {
   res.json({ ok: true, message: 'SSR cache invalidated.' });
 });
 
+const isTestEnvironment = process.env.NODE_ENV === 'test' || process.argv.includes('--test');
+
 const vite = await createViteServer({
   server: {
     middlewareMode: true,
+    hmr: isTestEnvironment ? false : undefined,
   },
   appType: 'custom',
 });
@@ -813,8 +816,12 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   res.status(500).json({ message });
 });
 
-await connectToDatabase();
+if (!isTestEnvironment) {
+  await connectToDatabase();
 
-app.listen(port, () => {
-  console.log(`SSR server running on http://localhost:${port}`);
-});
+  app.listen(port, () => {
+    console.log(`SSR server running on http://localhost:${port}`);
+  });
+}
+
+export { app, vite };
