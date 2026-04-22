@@ -1,5 +1,5 @@
 import express from 'express';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
@@ -30,11 +30,22 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const port = Number(process.env.PORT ?? 3000);
+const uploadsDir = path.resolve(rootDir, 'uploads');
+const maxUploadSizeBytes = 8 * 1024 * 1024;
+
+const allowedImageMimeToExtension: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/avif': 'avif',
+};
 
 const app = express();
 app.set('trust proxy', true);
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '12mb' }));
+app.use(express.urlencoded({ extended: true, limit: '12mb' }));
+app.use('/uploads', express.static(uploadsDir));
 
 let cachedHtml: string | null = null;
 const activeSessions = new Map<string, { userId: string; expiresAt: number }>();
@@ -71,6 +82,61 @@ function getActiveSessionFromRequest(req: express.Request) {
 
 function respondHiddenNotFound(res: express.Response) {
   res.status(404).set({ 'Content-Type': 'text/plain; charset=utf-8' }).send('Not Found');
+}
+
+type UploadRequestBody = {
+  fileName?: string;
+  mimeType?: string;
+  base64Data?: string;
+};
+
+async function saveUploadedImage(body: unknown) {
+  const payload = body as UploadRequestBody;
+  const mimeType = typeof payload.mimeType === 'string' ? payload.mimeType.trim().toLowerCase() : '';
+  const extension = allowedImageMimeToExtension[mimeType];
+
+  if (!extension) {
+    throw new Error('Invalid file type.');
+  }
+
+  const base64Data = typeof payload.base64Data === 'string' ? payload.base64Data.trim() : '';
+  if (!base64Data) {
+    throw new Error('Missing image data.');
+  }
+
+  const fileBuffer = Buffer.from(base64Data, 'base64');
+  if (!fileBuffer.length || fileBuffer.length > maxUploadSizeBytes) {
+    throw new Error('Invalid image size.');
+  }
+
+  const uploadedName = `${Date.now()}-${randomBytes(8).toString('hex')}.${extension}`;
+  await mkdir(uploadsDir, { recursive: true });
+  await writeFile(path.resolve(uploadsDir, uploadedName), fileBuffer);
+
+  return {
+    url: `/uploads/${uploadedName}`,
+  };
+}
+
+async function listUploads() {
+  await mkdir(uploadsDir, { recursive: true });
+  const names = await readdir(uploadsDir);
+
+  const files = await Promise.all(
+    names.map(async (name) => {
+      const fullPath = path.resolve(uploadsDir, name);
+      const fileStats = await stat(fullPath);
+
+      return {
+        name,
+        url: `/uploads/${name}`,
+        size: fileStats.size,
+        uploadedAt: fileStats.mtime.toISOString(),
+      };
+    })
+  );
+
+  return files.sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1));
 }
 
 function parseRequiredStringField(body: unknown, fieldName: string, maxLength: number = 10000): string {
@@ -218,6 +284,12 @@ app.get('/admin', async (req, res, next) => {
       textarea { min-height: 80px; resize: vertical; }
       button { border: none; background: #111827; color: #fff; border-radius: 8px; padding: 0.58rem 0.9rem; cursor: pointer; font-weight: 600; }
       button:hover { opacity: 0.92; }
+      .upload-row { display: grid; grid-template-columns: 1fr auto; gap: 0.55rem; align-items: end; }
+      .upload-help { margin-top: -0.3rem; color: #6b7280; font-size: 0.82rem; }
+      .uploads-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0.65rem; }
+      .upload-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 0.5rem; background: #fff; }
+      .upload-card img { width: 100%; height: 120px; object-fit: cover; border-radius: 8px; background: #f3f4f6; }
+      .upload-card a { display: block; margin-top: 0.45rem; color: #1f2937; font-size: 0.8rem; word-break: break-all; text-decoration: none; }
       .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
       .stat-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 0.8rem; background: #fff; }
       .status-message { padding: 0.75rem 1rem; border-radius: 8px; background: #ecfeff; color: #0f766e; border: 1px solid #99f6e4; }
@@ -246,6 +318,8 @@ app.get('/admin', async (req, res, next) => {
           <p><label>CTA Text<br /><input name="ctaText" required style="width:100%;" value="${escapeHtml(hero.ctaText)}" /></label></p>
           <p><label>CTA Href<br /><input name="ctaHref" required style="width:100%;" value="${escapeHtml(hero.ctaHref)}" /></label></p>
           <p><label>Background Image URL<br /><input name="backgroundImageUrl" required style="width:100%;" value="${escapeHtml(hero.backgroundImageUrl)}" /></label></p>
+          <p class="upload-help">Upload an image to auto-fill Background Image URL.</p>
+          <p class="upload-row"><input type="file" class="image-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" data-target-field="backgroundImageUrl" /><button type="button" class="image-upload-button" data-target-field="backgroundImageUrl">Upload Image</button></p>
           <p><label>Background Image Alt<br /><input name="backgroundImageAlt" required style="width:100%;" value="${escapeHtml(hero.backgroundImageAlt)}" /></label></p>
           <p><button type="submit">Save Hero</button></p>
         </form>
@@ -263,6 +337,8 @@ app.get('/admin', async (req, res, next) => {
           <p><label>Process Kicker<br /><input name="processEyebrow" required style="width:100%;" value="${escapeHtml(about.processEyebrow)}" /></label></p>
           <p><label>Process Description<br /><textarea name="processDescription" required style="width:100%; min-height: 70px;">${escapeHtml(about.processDescription)}</textarea></label></p>
           <p><label>Image URL<br /><input name="imageUrl" required style="width:100%;" value="${escapeHtml(about.imageUrl)}" /></label></p>
+          <p class="upload-help">Upload an image to auto-fill About Image URL.</p>
+          <p class="upload-row"><input type="file" class="image-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" data-target-field="imageUrl" /><button type="button" class="image-upload-button" data-target-field="imageUrl">Upload Image</button></p>
           <p><label>Image Alt<br /><input name="imageAlt" required style="width:100%;" value="${escapeHtml(about.imageAlt)}" /></label></p>
           <p><button type="submit">Save About</button></p>
         </form>
@@ -300,12 +376,124 @@ app.get('/admin', async (req, res, next) => {
         </form>
       </section>
       <section>
+        <h2>Image Library</h2>
+        <p class="upload-help" id="upload-status">Upload images from Hero/About forms above. Reuse URLs here later in Featured Work.</p>
+        <div id="uploads-list" class="uploads-list"></div>
+      </section>
+      <section>
         <h2>Reset</h2>
         <form method="post" action="/admin/content/reset" onsubmit="return confirm('Reset all website content to defaults?');">
           <button type="submit" style="background: #b91c1c; color: #fff; border: none; padding: 0.55rem 0.85rem; border-radius: 6px;">Reset all content</button>
         </form>
       </section>
     </main>
+    <script>
+      (function () {
+        const statusEl = document.getElementById('upload-status');
+        const uploadsListEl = document.getElementById('uploads-list');
+
+        function setStatus(message, isError) {
+          if (!statusEl) return;
+          statusEl.textContent = message;
+          statusEl.style.color = isError ? '#b91c1c' : '#6b7280';
+        }
+
+        async function refreshUploads() {
+          if (!uploadsListEl) return;
+
+          try {
+            const response = await fetch('/api/uploads');
+            if (!response.ok) {
+              throw new Error('Failed to load uploads.');
+            }
+
+            const uploads = await response.json();
+            if (!Array.isArray(uploads) || uploads.length === 0) {
+              uploadsListEl.innerHTML = '<p class="upload-help">No images uploaded yet.</p>';
+              return;
+            }
+
+            uploadsListEl.innerHTML = uploads
+              .slice(0, 24)
+              .map(function (item) {
+                const safeUrl = String(item.url || '');
+                return '<div class="upload-card">' +
+                  '<img src="' + safeUrl + '" alt="Uploaded image" />' +
+                  '<a href="' + safeUrl + '" target="_blank" rel="noopener">' + safeUrl + '</a>' +
+                '</div>';
+              })
+              .join('');
+          } catch {
+            uploadsListEl.innerHTML = '<p class="upload-help">Failed to load uploaded images.</p>';
+          }
+        }
+
+        async function fileToBase64(file) {
+          return new Promise(function (resolve, reject) {
+            const reader = new FileReader();
+            reader.onload = function () {
+              const result = typeof reader.result === 'string' ? reader.result : '';
+              const commaIndex = result.indexOf(',');
+              if (commaIndex < 0) {
+                reject(new Error('Invalid image data.'));
+                return;
+              }
+
+              resolve(result.slice(commaIndex + 1));
+            };
+            reader.onerror = function () {
+              reject(new Error('Could not read file.'));
+            };
+            reader.readAsDataURL(file);
+          });
+        }
+
+        document.querySelectorAll('.image-upload-button').forEach(function (button) {
+          button.addEventListener('click', async function () {
+            const targetField = button.getAttribute('data-target-field');
+            if (!targetField) return;
+
+            const fileInput = document.querySelector('input.image-file-input[data-target-field="' + targetField + '"]');
+            const targetInput = document.querySelector('input[name="' + targetField + '"]');
+            const selectedFile = fileInput && fileInput.files ? fileInput.files[0] : null;
+
+            if (!selectedFile || !targetInput) {
+              setStatus('Select an image first.', true);
+              return;
+            }
+
+            try {
+              setStatus('Uploading image...', false);
+              const base64Data = await fileToBase64(selectedFile);
+
+              const response = await fetch('/api/uploads', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  fileName: selectedFile.name,
+                  mimeType: selectedFile.type,
+                  base64Data: base64Data,
+                }),
+              });
+
+              const payload = await response.json();
+              if (!response.ok || !payload || typeof payload.url !== 'string') {
+                throw new Error(payload && payload.message ? payload.message : 'Upload failed.');
+              }
+
+              targetInput.value = payload.url;
+              setStatus('Image uploaded. URL inserted into field.', false);
+              refreshUploads();
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Upload failed.';
+              setStatus(message, true);
+            }
+          });
+        });
+
+        refreshUploads();
+      })();
+    </script>
   </body>
 </html>`);
   } catch (error) {
@@ -557,6 +745,35 @@ app.get('/api/craftsmanship', async (_req, res, next) => {
   }
 });
 
+app.get('/api/uploads', async (_req, res, next) => {
+  try {
+    const uploads = await listUploads();
+    res.json(uploads);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/uploads', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const uploaded = await saveUploadedImage(req.body);
+    res.status(201).json(uploaded);
+  } catch (error) {
+    if (error instanceof Error && (error.message.startsWith('Invalid') || error.message.startsWith('Missing'))) {
+      res.status(400).json({ message: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
 app.post('/api/visits/track', siteVisitTrackRateLimit, async (_req, res, next) => {
   try {
     await incrementVisitCount();
@@ -672,6 +889,16 @@ app.get('*', async (req, res, next) => {
 });
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'type' in error &&
+    (error as { type?: string }).type === 'entity.too.large'
+  ) {
+    res.status(413).json({ message: 'Uploaded image is too large.' });
+    return;
+  }
+
   const message = error instanceof Error ? error.message : 'Unknown server error';
   res.status(500).json({ message });
 });
