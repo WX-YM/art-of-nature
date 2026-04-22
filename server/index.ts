@@ -26,20 +26,11 @@ import {
   parseContactMessageInput,
   serializeForScript,
 } from './http-utils';
+import { uploadsDir, saveUploadedImage, listUploads } from './upload-service';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const port = Number(process.env.PORT ?? 3000);
-const uploadsDir = path.resolve(rootDir, 'uploads');
-const maxUploadSizeBytes = 8 * 1024 * 1024;
-
-const allowedImageMimeToExtension: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-  'image/avif': 'avif',
-};
 
 const app = express();
 app.set('trust proxy', true);
@@ -84,131 +75,14 @@ function respondHiddenNotFound(res: express.Response) {
   res.status(404).set({ 'Content-Type': 'text/plain; charset=utf-8' }).send('Not Found');
 }
 
-type UploadRequestBody = {
-  fileName?: string;
-  mimeType?: string;
-  base64Data?: string;
-};
-
-async function saveUploadedImage(body: unknown) {
-  const payload = body as UploadRequestBody;
-  const mimeType = typeof payload.mimeType === 'string' ? payload.mimeType.trim().toLowerCase() : '';
-  const extension = allowedImageMimeToExtension[mimeType];
-
-  if (!extension) {
-    throw new Error('Invalid file type.');
-  }
-
-  const base64Data = typeof payload.base64Data === 'string' ? payload.base64Data.trim() : '';
-  if (!base64Data) {
-    throw new Error('Missing image data.');
-  }
-
-  const fileBuffer = Buffer.from(base64Data, 'base64');
-  if (!fileBuffer.length || fileBuffer.length > maxUploadSizeBytes) {
-    throw new Error('Invalid image size.');
-  }
-
-  const uploadedName = `${Date.now()}-${randomBytes(8).toString('hex')}.${extension}`;
-  await mkdir(uploadsDir, { recursive: true });
-  await writeFile(path.resolve(uploadsDir, uploadedName), fileBuffer);
-
-  return {
-    url: `/uploads/${uploadedName}`,
-  };
-}
-
-async function listUploads() {
-  await mkdir(uploadsDir, { recursive: true });
-  const names = await readdir(uploadsDir);
-
-  const files = await Promise.all(
-    names.map(async (name) => {
-      const fullPath = path.resolve(uploadsDir, name);
-      const fileStats = await stat(fullPath);
-
-      return {
-        name,
-        url: `/uploads/${name}`,
-        size: fileStats.size,
-        uploadedAt: fileStats.mtime.toISOString(),
-      };
-    })
-  );
-
-  return files.sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1));
-}
-
-function parseRequiredStringField(body: unknown, fieldName: string, maxLength: number = 10000): string {
-  const value = (body as Record<string, unknown>)[fieldName];
-  const parsed = typeof value === 'string' ? value.trim() : '';
-
-  if (!parsed || parsed.length > maxLength) {
-    throw new Error(`Invalid ${fieldName}.`);
-  }
-
-  return parsed;
-}
-
-function parseMultilineField(body: unknown, fieldName: string): string[] {
-  const raw = (body as Record<string, unknown>)[fieldName];
-  if (typeof raw !== 'string') {
-    return [];
-  }
-
-  return raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-function toContactLinksText(directContacts: ContactContent['directContacts']): string {
-  return directContacts.map((item) => `${item.href} | ${item.label}`).join('\n');
-}
-
-function toCraftsmanshipItemsText(items: CraftsmanshipContent['items']): string {
-  return items.map((item) => `${item.title} | ${item.description}`).join('\n');
-}
-
-function parseDirectContacts(body: unknown, fieldName: string): ContactContent['directContacts'] {
-  return parseMultilineField(body, fieldName)
-    .map((line) => {
-      const separatorIndex = line.indexOf('|');
-      if (separatorIndex < 0) {
-        return null;
-      }
-
-      const href = line.slice(0, separatorIndex).trim();
-      const label = line.slice(separatorIndex + 1).trim();
-
-      if (!href || !label) {
-        return null;
-      }
-
-      return { href, label };
-    })
-    .filter((item): item is { href: string; label: string } => item !== null);
-}
-
-function parseCraftsmanshipItems(body: unknown, fieldName: string): CraftsmanshipContent['items'] {
-  return parseMultilineField(body, fieldName)
-    .map((line) => {
-      const separatorIndex = line.indexOf('|');
-      if (separatorIndex < 0) {
-        return null;
-      }
-
-      const title = line.slice(0, separatorIndex).trim();
-      const description = line.slice(separatorIndex + 1).trim();
-
-      if (!title || !description) {
-        return null;
-      }
-
-      return { title, description };
-    })
-    .filter((item): item is { title: string; description: string } => item !== null);
-}
+import {
+  parseRequiredStringField,
+  parseMultilineField,
+  toContactLinksText,
+  toCraftsmanshipItemsText,
+  parseDirectContacts,
+  parseCraftsmanshipItems
+} from './admin-utils';
 
 async function getAuthenticatedUser(req: express.Request) {
   const session = getActiveSessionFromRequest(req);
@@ -745,8 +619,14 @@ app.get('/api/craftsmanship', async (_req, res, next) => {
   }
 });
 
-app.get('/api/uploads', async (_req, res, next) => {
+app.get('/api/uploads', async (req, res, next) => {
   try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
     const uploads = await listUploads();
     res.json(uploads);
   } catch (error) {
@@ -783,8 +663,14 @@ app.post('/api/visits/track', siteVisitTrackRateLimit, async (_req, res, next) =
   }
 });
 
-app.get('/api/visits', async (_req, res, next) => {
+app.get('/api/visits', async (req, res, next) => {
   try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
     const totalVisits = await getVisitCount();
     res.json({ totalVisits });
   } catch (error) {
@@ -794,6 +680,12 @@ app.get('/api/visits', async (_req, res, next) => {
 
 app.put('/api/about', async (req, res, next) => {
   try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
     const content = req.body as AboutContent;
     const saved = await upsertAboutContent(content);
     invalidatePageCache();
@@ -805,6 +697,12 @@ app.put('/api/about', async (req, res, next) => {
 
 app.put('/api/hero', async (req, res, next) => {
   try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
     const content = req.body as HeroContent;
     const saved = await upsertHeroContent(content);
     invalidatePageCache();
@@ -816,6 +714,12 @@ app.put('/api/hero', async (req, res, next) => {
 
 app.put('/api/contact', async (req, res, next) => {
   try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
     const content = req.body as ContactContent;
     const saved = await upsertContactContent(content);
     invalidatePageCache();
@@ -827,6 +731,12 @@ app.put('/api/contact', async (req, res, next) => {
 
 app.put('/api/craftsmanship', async (req, res, next) => {
   try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
     const content = req.body as CraftsmanshipContent;
     const saved = await upsertCraftsmanshipContent(content);
     invalidatePageCache();
@@ -840,7 +750,7 @@ app.post('/api/cache/invalidate', (req, res) => {
   const token = req.header('x-cache-token') ?? req.body?.token;
 
   if (!isAuthorizedForInvalidation(token)) {
-    res.status(401).json({ message: 'Invalid cache invalidation token.' });
+    respondHiddenNotFound(res);
     return;
   }
 

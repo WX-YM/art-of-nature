@@ -58,6 +58,17 @@ export function escapeHtml(value: string) {
 export function createIpRateLimiter(windowMs: number, maxRequests: number) {
   const requestsByIp = new Map<string, { count: number; windowStart: number }>();
 
+  // Cleanup interval to prevent memory leaks from stale IP tracking
+  const cleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, current] of requestsByIp.entries()) {
+      if (now - current.windowStart >= windowMs) {
+        requestsByIp.delete(ip);
+      }
+    }
+  }, Math.max(windowMs, 60000));
+  cleanupTimer.unref();
+
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const now = Date.now();
     const ip = req.ip || 'unknown';
