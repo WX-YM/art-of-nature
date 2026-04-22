@@ -36,6 +36,7 @@ test('parseContactMessageInput validates and trims contact payload', () => {
   const parsed = parseContactMessageInput({
     name: '  Jane Doe  ',
     email: '  jane@example.com  ',
+    phone: '  +1 (555) 010-1234  ',
     projectType: '  Furniture  ',
     message: '  Hello there  ',
   });
@@ -44,10 +45,40 @@ test('parseContactMessageInput validates and trims contact payload', () => {
     data: {
       name: 'Jane Doe',
       email: 'jane@example.com',
+      phone: '+1 (555) 010-1234',
       projectType: 'Furniture',
       message: 'Hello there',
     },
   });
+});
+
+test('parseContactMessageInput allows missing phone and rejects invalid phone', () => {
+  const parsedWithoutPhone = parseContactMessageInput({
+    name: 'Jane Doe',
+    email: 'jane@example.com',
+    projectType: 'Furniture',
+    message: 'Hello there',
+  });
+
+  assert.deepEqual(parsedWithoutPhone, {
+    data: {
+      name: 'Jane Doe',
+      email: 'jane@example.com',
+      phone: undefined,
+      projectType: 'Furniture',
+      message: 'Hello there',
+    },
+  });
+
+  const parsedWithInvalidPhone = parseContactMessageInput({
+    name: 'Jane Doe',
+    email: 'jane@example.com',
+    phone: 'abc#@',
+    projectType: 'Furniture',
+    message: 'Hello there',
+  });
+
+  assert.deepEqual(parsedWithInvalidPhone, { error: 'Please provide a valid phone number.' });
 });
 
 test('parseContactMessageInput rejects oversized fields', () => {

@@ -10,12 +10,15 @@ export async function createContactMessage(
   input: ContactMessageInput,
   metadata: ContactMessageMetadata
 ): Promise<void> {
-  await ContactMessageModel.create({
+  const payload = {
     name: input.name,
     email: input.email,
+    ...(input.phone ? { phone: input.phone } : {}),
     projectType: input.projectType,
     message: input.message,
     ipAddress: metadata.ipAddress,
     userAgent: metadata.userAgent,
-  });
+  };
+
+  await ContactMessageModel.create(payload);
 }

@@ -107,6 +107,7 @@ export function parseContactMessageInput(body: unknown): { data: ContactMessageI
   const raw = body as Record<string, unknown>;
   const name = typeof raw.name === 'string' ? raw.name.trim() : '';
   const email = typeof raw.email === 'string' ? raw.email.trim() : '';
+  const phone = typeof raw.phone === 'string' ? raw.phone.trim() : '';
   const projectType = typeof raw.projectType === 'string' ? raw.projectType.trim() : '';
   const message = typeof raw.message === 'string' ? raw.message.trim() : '';
 
@@ -114,8 +115,13 @@ export function parseContactMessageInput(body: unknown): { data: ContactMessageI
     return { error: 'All fields are required.' };
   }
 
-  if (name.length > 120 || email.length > 254 || projectType.length > 120 || message.length > 5000) {
+  if (name.length > 120 || email.length > 254 || phone.length > 40 || projectType.length > 120 || message.length > 5000) {
     return { error: 'One or more fields exceed allowed length.' };
+  }
+
+  const phonePattern = /^[+\d\s().-]+$/;
+  if (phone && !phonePattern.test(phone)) {
+    return { error: 'Please provide a valid phone number.' };
   }
 
   const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -127,6 +133,7 @@ export function parseContactMessageInput(body: unknown): { data: ContactMessageI
     data: {
       name,
       email,
+      phone: phone || undefined,
       projectType,
       message,
     },

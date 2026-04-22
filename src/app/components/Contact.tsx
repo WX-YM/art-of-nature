@@ -71,6 +71,16 @@ export function Contact({ content }: ContactProps) {
                 placeholder={emailPlaceholder || undefined}
               />
             </div>
+            <div>
+              <label htmlFor="phone" className="block mb-2">Phone (optional)</label>
+              <input
+                type="tel"
+                id="phone"
+                name="phone"
+                className="w-full px-4 py-3 bg-input-background border border-border focus:outline-none focus:border-accent transition-colors"
+                placeholder="Your phone number"
+              />
+            </div>
           </div>
 
           <div>
