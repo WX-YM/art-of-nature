@@ -39,7 +39,15 @@ import {
   parseContactMessageInput,
   serializeForScript,
 } from './http-utils';
-import { uploadsDir, saveUploadedImage, listUploads, createUploadFolder, deleteUpload } from './upload-service';
+import {
+  uploadsDir,
+  saveUploadedImage,
+  listUploadEntries,
+  createUploadFolder,
+  getUploadFile,
+  deleteUpload,
+  deleteUploadFolder,
+} from './upload-service';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -47,8 +55,8 @@ const port = Number(process.env.PORT ?? 3000);
 
 const app = express();
 app.set('trust proxy', true);
-app.use(express.json({ limit: '12mb' }));
-app.use(express.urlencoded({ extended: true, limit: '12mb' }));
+app.use(express.json({ limit: '32mb' }));
+app.use(express.urlencoded({ extended: true, limit: '32mb' }));
 app.use('/uploads', express.static(uploadsDir));
 app.use('/api', (req, res, next) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
@@ -142,6 +150,15 @@ function getGoogleOAuthRedirectUri(req: express.Request) {
 
 function slugifyEditorValue(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function isUploadClientErrorMessage(message: string) {
+  return (
+    message.startsWith('Invalid') ||
+    message.startsWith('Missing') ||
+    message === 'File not found.' ||
+    message === 'Folder not found.'
+  );
 }
 
 type SeoMetadata = {
@@ -849,12 +866,99 @@ app.get('/admin', async (req, res, next) => {
         font-size: 0.78rem;
       }
       button:hover { background: var(--admin-accent); border-color: var(--admin-accent); opacity: 1; }
-      .upload-row { display: grid; grid-template-columns: 1fr auto; gap: 0.55rem; align-items: end; }
+      .upload-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.55rem; align-items: end; }
+      .upload-inline-status {
+        grid-column: 1 / -1;
+        margin: 0;
+        color: var(--admin-muted);
+        font-size: 0.76rem;
+        line-height: 1.5;
+      }
+      .upload-inline-status.is-error { color: #b91c1c; }
+      .upload-inline-status.is-success { color: #17603c; }
       .upload-help { margin-top: -0.3rem; color: var(--admin-muted); font-size: 0.82rem; line-height: 1.6; }
       .uploads-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0.65rem; }
-      .upload-card { border: 1px solid var(--admin-border); border-radius: 16px; padding: 0.5rem; background: #fff; }
-      .upload-card img { width: 100%; height: 120px; object-fit: cover; border-radius: 8px; background: #f3f4f6; }
-      .upload-card a { display: block; margin-top: 0.45rem; color: var(--admin-accent-dark); font-size: 0.8rem; word-break: break-all; text-decoration: none; }
+      .uploads-pathbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0 0 0.85rem 0;
+      }
+      .uploads-current-path {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 2.6rem;
+        padding: 0.55rem 0.8rem;
+        border: 1px solid var(--admin-border);
+        background: rgba(255,255,255,0.74);
+        color: var(--admin-muted);
+        font-size: 0.8rem;
+      }
+      .uploads-breadcrumb {
+        border: none;
+        background: transparent;
+        color: var(--admin-accent-dark);
+        padding: 0;
+        font: inherit;
+        text-transform: none;
+        letter-spacing: 0.02em;
+      }
+      .uploads-breadcrumb.is-current { color: var(--admin-muted); cursor: default; }
+      .uploads-breadcrumb-separator { color: var(--admin-muted); opacity: 0.65; }
+      .upload-card {
+        border: 1px solid var(--admin-border);
+        border-radius: 16px;
+        padding: 0.75rem;
+        background: #fff;
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+      }
+      .upload-card img {
+        width: 100%;
+        height: 120px;
+        object-fit: cover;
+        border-radius: 8px;
+        background: #f3f4f6;
+      }
+      .upload-card a { display: block; margin-top: 0.15rem; color: var(--admin-accent-dark); font-size: 0.8rem; word-break: break-all; text-decoration: none; }
+      .upload-card-folder {
+        color: var(--admin-muted);
+        font-size: 0.72rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+      .upload-card-title {
+        color: var(--admin-accent-dark);
+        font-size: 0.92rem;
+        line-height: 1.45;
+        word-break: break-word;
+      }
+      .upload-card-meta {
+        color: var(--admin-muted);
+        font-size: 0.74rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .upload-folder-card {
+        justify-content: space-between;
+        min-height: 12rem;
+        background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(247,239,228,0.92));
+      }
+      .upload-folder-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 3rem;
+        height: 3rem;
+        border: 1px solid var(--admin-border);
+        border-radius: 12px;
+        background: rgba(255,255,255,0.92);
+        color: var(--admin-accent-dark);
+        font-size: 1.1rem;
+      }
       .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
       .stat-card { border: 1px solid var(--admin-border); border-radius: 18px; padding: 1rem; background: rgba(255,255,255,0.78); }
       .status-message { padding: 0.85rem 1rem; border-radius: 0; background: #f3f9f5; color: #17603c; border: 1px solid rgba(23,96,60,0.16); }
@@ -1121,7 +1225,7 @@ app.get('/admin', async (req, res, next) => {
         color: var(--admin-muted);
         background: rgba(255,255,255,0.6);
       }
-      .upload-library-toolbar { display: grid; gap: 0.75rem; grid-template-columns: minmax(0, 1fr) auto; align-items: end; margin-bottom: 0.9rem; }
+      .upload-library-toolbar { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); align-items: end; margin-bottom: 0.9rem; }
       .upload-card-actions { display: flex; gap: 0.45rem; margin-top: 0.55rem; }
       .upload-card-actions button { flex: 1; padding: 0.58rem 0.8rem; font-size: 0.78rem; }
       .admin-divider { margin: 1.25rem 0; border: none; border-top: 1px solid var(--admin-border); }
@@ -1203,7 +1307,7 @@ app.get('/admin', async (req, res, next) => {
       <section>
         <h2>Hero Content</h2>
         <p class="section-intro">Shape the first impression of the site with the opening lines, call to action, and full-bleed hero image.</p>
-        <form method="post" action="/admin/content/hero">
+        <form method="post" action="/admin/content/hero" data-image-upload-form data-image-upload-target="backgroundImageUrl">
           <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(hero.eyebrow)}" /></label></p>
           <p><label>Heading Line 1<br /><input name="headingLine1" required style="width:100%;" value="${escapeHtml(hero.headingLine1)}" /></label></p>
           <p><label>Heading Line 2<br /><input name="headingLine2" required style="width:100%;" value="${escapeHtml(hero.headingLine2)}" /></label></p>
@@ -1212,7 +1316,7 @@ app.get('/admin', async (req, res, next) => {
           <p><label>CTA Href<br /><input name="ctaHref" required style="width:100%;" value="${escapeHtml(hero.ctaHref)}" /></label></p>
           <p><label>Background Image URL<br /><input name="backgroundImageUrl" required style="width:100%;" value="${escapeHtml(hero.backgroundImageUrl)}" /></label></p>
           <p class="upload-help">Upload an image to auto-fill Background Image URL.</p>
-          <p class="upload-row"><input type="file" class="image-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" data-target-field="backgroundImageUrl" /><button type="button" class="image-upload-button" data-target-field="backgroundImageUrl">Upload Image</button></p>
+          <p class="upload-row"><input type="file" class="image-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" data-target-field="backgroundImageUrl" /><button type="button" class="image-upload-button" data-target-field="backgroundImageUrl">Upload Image</button><span class="upload-inline-status" data-upload-status-for="backgroundImageUrl"></span></p>
           <p><label>Background Image Alt<br /><input name="backgroundImageAlt" required style="width:100%;" value="${escapeHtml(hero.backgroundImageAlt)}" /></label></p>
           <p><button type="submit">Save Hero</button></p>
         </form>
@@ -1221,7 +1325,7 @@ app.get('/admin', async (req, res, next) => {
       <section>
         <h2>About Content</h2>
         <p class="section-intro">Refine the studio story, process notes, and portrait image without touching the layout itself.</p>
-        <form method="post" action="/admin/content/about">
+        <form method="post" action="/admin/content/about" data-image-upload-form data-image-upload-target="imageUrl">
           <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(about.eyebrow)}" /></label></p>
           <p><label>Heading<br /><input name="heading" required style="width:100%;" value="${escapeHtml(about.heading)}" /></label></p>
           <p><label>Paragraph 1<br /><textarea name="paragraph1" required style="width:100%; min-height: 70px;">${escapeHtml(about.paragraph1)}</textarea></label></p>
@@ -1232,7 +1336,7 @@ app.get('/admin', async (req, res, next) => {
           <p><label>Process Description<br /><textarea name="processDescription" required style="width:100%; min-height: 70px;">${escapeHtml(about.processDescription)}</textarea></label></p>
           <p><label>Image URL<br /><input name="imageUrl" required style="width:100%;" value="${escapeHtml(about.imageUrl)}" /></label></p>
           <p class="upload-help">Upload an image to auto-fill About Image URL.</p>
-          <p class="upload-row"><input type="file" class="image-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" data-target-field="imageUrl" /><button type="button" class="image-upload-button" data-target-field="imageUrl">Upload Image</button></p>
+          <p class="upload-row"><input type="file" class="image-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" data-target-field="imageUrl" /><button type="button" class="image-upload-button" data-target-field="imageUrl">Upload Image</button><span class="upload-inline-status" data-upload-status-for="imageUrl"></span></p>
           <p><label>Image Alt<br /><input name="imageAlt" required style="width:100%;" value="${escapeHtml(about.imageAlt)}" /></label></p>
           <p><button type="submit">Save About</button></p>
         </form>
@@ -1278,9 +1382,12 @@ app.get('/admin', async (req, res, next) => {
           <p style="margin:0;"><label>Search Archive<br /><input type="search" id="uploads-search" placeholder="Filename, folder, or URL" /></label></p>
           <p style="margin:0;"><label>Target Folder<br /><input type="text" id="uploads-folder" placeholder="e.g. hero/background" /></label></p>
           <p style="margin:0;"><button type="button" id="create-upload-folder" class="ghost-button">Create Folder</button></p>
+          <p style="margin:0;"><button type="button" id="uploads-go-root" class="ghost-button">Open Root</button></p>
+          <p style="margin:0;"><button type="button" id="uploads-go-parent" class="ghost-button">Up One Level</button></p>
           <p class="upload-help" style="margin:0;">Upload images from the content forms above, then reuse those URLs anywhere across the website.</p>
         </div>
         <p class="upload-help" id="upload-status">Upload images from Hero/About forms above. Reuse URLs here later across the homepage and gallery.</p>
+        <div id="uploads-pathbar" class="uploads-pathbar"></div>
         <div id="uploads-list" class="uploads-list"></div>
       </section>
       <section>
@@ -1354,9 +1461,14 @@ app.get('/admin', async (req, res, next) => {
         <p class="section-intro">Select an Image URLs field in a piece, then copy or insert assets from the archive directly into that item.</p>
         <div class="upload-library-toolbar">
           <p style="margin:0;"><label>Search Archive<br /><input type="search" id="uploads-search" placeholder="Filename, folder, or URL" /></label></p>
+          <p style="margin:0;"><label>Target Folder<br /><input type="text" id="uploads-folder" placeholder="e.g. gallery/living-room" /></label></p>
+          <p style="margin:0;"><button type="button" id="create-upload-folder" class="ghost-button">Create Folder</button></p>
+          <p style="margin:0;"><button type="button" id="uploads-go-root" class="ghost-button">Open Root</button></p>
+          <p style="margin:0;"><button type="button" id="uploads-go-parent" class="ghost-button">Up One Level</button></p>
           <p class="upload-help" style="margin:0;">Select an Image URLs field in a piece, then use Insert to append a URL.</p>
         </div>
         <p class="upload-help" id="upload-status">Upload a new image or reuse an existing URL from the archive below when editing a gallery piece.</p>
+        <div id="uploads-pathbar" class="uploads-pathbar"></div>
         <div id="uploads-list" class="uploads-list"></div>
       </section>
       ` : ''}
@@ -1436,9 +1548,14 @@ app.get('/admin', async (req, res, next) => {
         <p class="section-intro">Select a cover image field or article gallery field, then reuse assets from the archive directly inside the journal editor.</p>
         <div class="upload-library-toolbar">
           <p style="margin:0;"><label>Search Archive<br /><input type="search" id="uploads-search" placeholder="Filename, folder, or URL" /></label></p>
+          <p style="margin:0;"><label>Target Folder<br /><input type="text" id="uploads-folder" placeholder="e.g. journal/covers" /></label></p>
+          <p style="margin:0;"><button type="button" id="create-upload-folder" class="ghost-button">Create Folder</button></p>
+          <p style="margin:0;"><button type="button" id="uploads-go-root" class="ghost-button">Open Root</button></p>
+          <p style="margin:0;"><button type="button" id="uploads-go-parent" class="ghost-button">Up One Level</button></p>
           <p class="upload-help" style="margin:0;">Click into a Journal cover image or Gallery Images field first, then use Insert.</p>
         </div>
         <p class="upload-help" id="upload-status">Upload a new image or reuse existing archive URLs while editing journal entries.</p>
+        <div id="uploads-pathbar" class="uploads-pathbar"></div>
         <div id="uploads-list" class="uploads-list"></div>
       </section>
       ` : ''}
@@ -1501,7 +1618,10 @@ app.get('/admin', async (req, res, next) => {
         const uploadsListEl = document.getElementById('uploads-list');
         const uploadsSearchInput = document.getElementById('uploads-search');
         const uploadsFolderInput = document.getElementById('uploads-folder');
+        const uploadsPathbarEl = document.getElementById('uploads-pathbar');
         const createUploadFolderButton = document.getElementById('create-upload-folder');
+        const uploadsGoRootButton = document.getElementById('uploads-go-root');
+        const uploadsGoParentButton = document.getElementById('uploads-go-parent');
         const galleryEditorData = ${serializeForScript(galleryEditorState)};
         const galleryEditorEl = document.getElementById('gallery-piece-editor');
         const galleryAddPieceButton = document.getElementById('gallery-add-piece');
@@ -1535,7 +1655,8 @@ app.get('/admin', async (req, res, next) => {
         let journalPostsState = Array.isArray(journalEditorData && journalEditorData.posts)
           ? journalEditorData.posts.map(normalizeJournalEditorPost)
           : [];
-        let cachedUploads = [];
+        let cachedUploadEntries = [];
+        let currentUploadsPath = '';
         let lastFocusedUploadField = null;
 
         function escapeHtmlValue(value) {
@@ -1711,7 +1832,7 @@ app.get('/admin', async (req, res, next) => {
                     : '',
                 imageUrls:
                   imageUrls && typeof imageUrls.value === 'string'
-                    ? imageUrls.value.split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean)
+                    ? imageUrls.value.split(/\\r?\\n/).map(function (line) { return line.trim(); }).filter(Boolean)
                     : [],
               });
 
@@ -1833,7 +1954,7 @@ app.get('/admin', async (req, res, next) => {
         function getJournalReadingTime(bodyText) {
           const wordCount = String(bodyText || '')
             .trim()
-            .split(/\s+/)
+            .split(/\\s+/)
             .filter(Boolean)
             .length;
 
@@ -1962,7 +2083,7 @@ app.get('/admin', async (req, res, next) => {
                   coverImageAlt: getFieldValue('coverImageAlt'),
                   galleryImageUrls:
                     galleryImageUrlsField && typeof galleryImageUrlsField.value === 'string'
-                      ? galleryImageUrlsField.value.split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean)
+                      ? galleryImageUrlsField.value.split(/\\r?\\n/).map(function (line) { return line.trim(); }).filter(Boolean)
                       : [],
                   body: getFieldValue('body'),
                 }),
@@ -2066,6 +2187,53 @@ app.get('/admin', async (req, res, next) => {
           statusEl.style.color = isError ? '#b91c1c' : '#6b7280';
         }
 
+        function normalizeUploadsPath(value) {
+          return String(value || '')
+            .replace(/\\\\/g, '/')
+            .split('/')
+            .map(function (segment) { return segment.trim(); })
+            .filter(Boolean)
+            .join('/');
+        }
+
+        function getParentUploadsPath(value) {
+          const normalized = normalizeUploadsPath(value);
+          if (!normalized) {
+            return '';
+          }
+
+          const segments = normalized.split('/');
+          segments.pop();
+          return segments.join('/');
+        }
+
+        function syncUploadsFolderInput() {
+          if (uploadsFolderInput instanceof HTMLInputElement) {
+            uploadsFolderInput.value = currentUploadsPath;
+          }
+        }
+
+        function renderUploadsPathbar() {
+          if (!uploadsPathbarEl) {
+            return;
+          }
+
+          const normalized = normalizeUploadsPath(currentUploadsPath);
+          const segments = normalized ? normalized.split('/') : [];
+          let html = '<div class="uploads-current-path">';
+          html += '<button type="button" class="uploads-breadcrumb' + (segments.length === 0 ? ' is-current' : '') + '" data-open-folder="">Root</button>';
+
+          let runningPath = '';
+          segments.forEach(function (segment, index) {
+            runningPath = runningPath ? runningPath + '/' + segment : segment;
+            html += '<span class="uploads-breadcrumb-separator">/</span>';
+            html += '<button type="button" class="uploads-breadcrumb' + (index === segments.length - 1 ? ' is-current' : '') + '" data-open-folder="' + escapeHtmlValue(runningPath) + '">' + escapeHtmlValue(segment) + '</button>';
+          });
+
+          html += '</div>';
+          uploadsPathbarEl.innerHTML = html;
+        }
+
         function renderUploads() {
           if (!uploadsListEl) return;
 
@@ -2074,47 +2242,81 @@ app.get('/admin', async (req, res, next) => {
               ? uploadsSearchInput.value.trim().toLowerCase()
               : '';
 
-          const visibleUploads = cachedUploads
+          const visibleUploads = cachedUploadEntries
             .filter(function (item) {
               if (!searchTerm) {
                 return true;
               }
 
-              const url = item && typeof item.url === 'string' ? item.url.toLowerCase() : '';
-              return url.includes(searchTerm);
+              const searchableText = [
+                item && typeof item.name === 'string' ? item.name.toLowerCase() : '',
+                item && typeof item.path === 'string' ? item.path.toLowerCase() : '',
+                item && typeof item.folder === 'string' ? item.folder.toLowerCase() : '',
+                item && typeof item.url === 'string' ? item.url.toLowerCase() : '',
+              ].join(' ');
+
+              return searchableText.includes(searchTerm);
             })
             .slice(0, 80);
 
           if (visibleUploads.length === 0) {
             uploadsListEl.innerHTML = searchTerm
-              ? '<p class="upload-help">No uploaded images match that search.</p>'
-              : '<p class="upload-help">No images uploaded yet.</p>';
+              ? '<p class="upload-help">No files or folders match that search in this location.</p>'
+              : '<p class="upload-help">This folder is empty.</p>';
             return;
           }
 
           uploadsListEl.innerHTML = visibleUploads
             .map(function (item) {
+              if (item && item.type === 'directory') {
+                const safePath = escapeHtmlValue(String(item.path || ''));
+                const folderLabel = item.folder ? '<div class="upload-card-folder">' + escapeHtmlValue(item.folder) + '</div>' : '<div class="upload-card-folder">Root</div>';
+                return '<div class="upload-card upload-folder-card">' +
+                  '<div>' +
+                    '<div class="upload-folder-icon">DIR</div>' +
+                    folderLabel +
+                    '<div class="upload-card-title">' + escapeHtmlValue(String(item.name || 'Untitled folder')) + '</div>' +
+                    '<div class="upload-card-meta">' + escapeHtmlValue(String(item.itemCount || 0)) + ' item' + (Number(item.itemCount) === 1 ? '' : 's') + '</div>' +
+                  '</div>' +
+                  '<div class="upload-card-actions">' +
+                    '<button type="button" class="ghost-button" data-open-folder="' + safePath + '">Open</button>' +
+                    '<button type="button" class="ghost-button" data-delete-folder="' + safePath + '">Delete</button>' +
+                  '</div>' +
+                '</div>';
+              }
+
+              const safePath = escapeHtmlValue(String(item.path || ''));
               const safeUrl = escapeHtmlValue(String(item.url || ''));
-              const folderLabel = item.folder ? '<div class="upload-card-folder">' + escapeHtmlValue(item.folder) + '</div>' : '';
+              const previewSrc = '/api/uploads/image?path=' + encodeURIComponent(String(item.path || ''));
+              const folderLabel = item.folder ? '<div class="upload-card-folder">' + escapeHtmlValue(item.folder) + '</div>' : '<div class="upload-card-folder">Root</div>';
               return '<div class="upload-card">' +
-                '<img src="' + safeUrl + '" alt="Uploaded image" />' +
-                '<a href="' + safeUrl + '" target="_blank" rel="noopener">' + safeUrl + '</a>' +
+                '<img src="' + previewSrc + '" alt="Uploaded image" loading="lazy" />' +
                 folderLabel +
+                '<div class="upload-card-title">' + escapeHtmlValue(String(item.name || 'Untitled file')) + '</div>' +
+                '<a href="' + safeUrl + '" target="_blank" rel="noopener">' + safeUrl + '</a>' +
+                '<div class="upload-card-meta">' + escapeHtmlValue(String(item.mimeType || 'file')) + '</div>' +
                 '<div class="upload-card-actions">' +
                   '<button type="button" class="ghost-button" data-copy-upload="' + safeUrl + '">Copy URL</button>' +
                   '<button type="button" class="ghost-button" data-insert-upload="' + safeUrl + '">Insert</button>' +
-                  '<button type="button" class="ghost-button" data-delete-upload="' + escapeHtmlValue(String(item.path || '')) + '">Delete</button>' +
+                  '<button type="button" class="ghost-button" data-delete-upload="' + safePath + '">Delete</button>' +
                 '</div>' +
               '</div>';
             })
             .join('');
         }
 
-        async function refreshUploads() {
+        async function refreshUploads(nextPath) {
           if (!uploadsListEl) return;
 
           try {
-            const response = await fetch('/api/uploads', {
+            currentUploadsPath = normalizeUploadsPath(nextPath !== undefined ? nextPath : currentUploadsPath);
+            syncUploadsFolderInput();
+            renderUploadsPathbar();
+
+            const query = currentUploadsPath
+              ? '?path=' + encodeURIComponent(currentUploadsPath)
+              : '';
+            const response = await fetch('/api/uploads/tree' + query, {
               cache: 'no-store',
               credentials: 'same-origin',
             });
@@ -2123,7 +2325,7 @@ app.get('/admin', async (req, res, next) => {
             }
 
             const uploads = await response.json();
-            cachedUploads = Array.isArray(uploads) ? uploads : [];
+            cachedUploadEntries = Array.isArray(uploads) ? uploads : [];
             renderUploads();
           } catch {
             uploadsListEl.innerHTML = '<p class="upload-help">Failed to load uploaded images.</p>';
@@ -2150,7 +2352,27 @@ app.get('/admin', async (req, res, next) => {
           });
         }
 
+        function setInlineUploadStatus(targetField, message, state) {
+          if (!targetField) {
+            return;
+          }
+
+          const statusNode = document.querySelector('[data-upload-status-for="' + targetField + '"]');
+          if (!(statusNode instanceof HTMLElement)) {
+            return;
+          }
+
+          statusNode.textContent = message || '';
+          statusNode.classList.remove('is-error', 'is-success');
+          if (state === 'error') {
+            statusNode.classList.add('is-error');
+          } else if (state === 'success') {
+            statusNode.classList.add('is-success');
+          }
+        }
+
         function triggerFieldChange(field) {
+          field.dispatchEvent(new Event('input', { bubbles: true }));
           field.dispatchEvent(new Event('change', { bubbles: true }));
         }
 
@@ -2170,8 +2392,8 @@ app.get('/admin', async (req, res, next) => {
 
         async function uploadSingleImage(file) {
           const base64Data = await fileToBase64(file);
-          const targetFolder = uploadsFolderInput && uploadsFolderInput instanceof HTMLInputElement ? uploadsFolderInput.value.trim() : '';
-          const response = await fetch('/api/uploads', {
+          const targetFolder = normalizeUploadsPath(uploadsFolderInput && uploadsFolderInput instanceof HTMLInputElement ? uploadsFolderInput.value.trim() : currentUploadsPath);
+          const response = await fetch('/api/uploads/files', {
             method: 'POST',
             cache: 'no-store',
             credentials: 'same-origin',
@@ -2202,30 +2424,171 @@ app.get('/admin', async (req, res, next) => {
           return uploadedUrls;
         }
 
+        function getContentImageUploadElements(form, targetField) {
+          if (!(form instanceof HTMLFormElement) || !targetField) {
+            return null;
+          }
+
+          const row = form.querySelector('.upload-row');
+          const fileInput = row ? row.querySelector('input.image-file-input[data-target-field="' + targetField + '"]') : null;
+          const targetInput = form.elements.namedItem(targetField);
+          const uploadButton = row ? row.querySelector('.image-upload-button[data-target-field="' + targetField + '"]') : null;
+
+          return {
+            row: row,
+            fileInput: fileInput,
+            targetInput: targetInput,
+            uploadButton: uploadButton,
+          };
+        }
+
+        async function uploadContentImageForField(form, targetField, options) {
+          const elements = getContentImageUploadElements(form, targetField);
+          const fileInput = elements && elements.fileInput;
+          const targetInput = elements && elements.targetInput;
+          const uploadButton = elements && elements.uploadButton;
+          const selectedFile =
+            fileInput instanceof HTMLInputElement && fileInput.files
+              ? fileInput.files[0]
+              : null;
+
+          if (!selectedFile || !(targetInput instanceof HTMLInputElement || targetInput instanceof HTMLTextAreaElement)) {
+            setInlineUploadStatus(targetField, 'Select an image first.', 'error');
+            throw new Error('Select an image first.');
+          }
+
+          const buttonWasDisabled = uploadButton instanceof HTMLButtonElement ? uploadButton.disabled : false;
+          const originalButtonLabel =
+            uploadButton instanceof HTMLButtonElement
+              ? uploadButton.textContent
+              : null;
+
+          try {
+            if (uploadButton instanceof HTMLButtonElement) {
+              uploadButton.disabled = true;
+              uploadButton.textContent = 'Uploading...';
+            }
+
+            setInlineUploadStatus(targetField, 'Uploading image...', 'pending');
+            setStatus('Uploading image...', false);
+
+            const uploadedUrl = await uploadSingleImage(selectedFile);
+            targetInput.value = uploadedUrl;
+            triggerFieldChange(targetInput);
+            targetInput.focus();
+
+            if (fileInput instanceof HTMLInputElement && options && options.clearSelection !== false) {
+              fileInput.value = '';
+            }
+
+            setInlineUploadStatus(targetField, 'Image uploaded. Save this section to publish it.', 'success');
+            setStatus('Image uploaded. URL inserted into field.', false);
+            await refreshUploads(normalizeUploadsPath(uploadsFolderInput && uploadsFolderInput instanceof HTMLInputElement ? uploadsFolderInput.value : currentUploadsPath));
+            return uploadedUrl;
+          } finally {
+            if (uploadButton instanceof HTMLButtonElement) {
+              uploadButton.disabled = buttonWasDisabled;
+              uploadButton.textContent = originalButtonLabel || 'Upload Image';
+            }
+          }
+        }
+
         document.querySelectorAll('.image-upload-button').forEach(function (button) {
           button.addEventListener('click', async function (event) {
             event.preventDefault();
             const targetField = button.getAttribute('data-target-field');
             if (!targetField) return;
 
-            const fileInput = document.querySelector('input.image-file-input[data-target-field="' + targetField + '"]');
-            const targetInput = document.querySelector('input[name="' + targetField + '"]');
-            const selectedFile = fileInput && fileInput.files ? fileInput.files[0] : null;
-
-            if (!selectedFile || !targetInput) {
-              setStatus('Select an image first.', true);
+            const form = button.closest('form');
+            if (!(form instanceof HTMLFormElement)) {
               return;
             }
 
             try {
-              setStatus('Uploading image...', false);
-              const uploadedUrl = await uploadSingleImage(selectedFile);
-              targetInput.value = uploadedUrl;
-              setStatus('Image uploaded. URL inserted into field.', false);
-              refreshUploads();
+              await uploadContentImageForField(form, targetField, { clearSelection: true });
             } catch (error) {
               const message = error instanceof Error ? error.message : 'Upload failed.';
+              setInlineUploadStatus(targetField, message, 'error');
               setStatus(message, true);
+            }
+          });
+        });
+
+        document.querySelectorAll('.image-file-input').forEach(function (input) {
+          input.addEventListener('change', function () {
+            if (!(input instanceof HTMLInputElement)) {
+              return;
+            }
+
+            const targetField = input.getAttribute('data-target-field');
+            if (!targetField) {
+              return;
+            }
+
+            const hasSelection = Boolean(input.files && input.files.length);
+            setInlineUploadStatus(
+              targetField,
+              hasSelection ? 'Image selected. Press Upload Image to insert it.' : '',
+              hasSelection ? 'success' : 'pending',
+            );
+          });
+        });
+
+        document.querySelectorAll('[data-journal-upload-file]').forEach(function (input) {
+          input.addEventListener('change', function () {
+            if (!(input instanceof HTMLInputElement)) {
+              return;
+            }
+
+            const selectedCount = input.files ? input.files.length : 0;
+            if (selectedCount === 0) {
+              return;
+            }
+
+            setStatus(
+              'Selected ' + selectedCount + ' image' + (selectedCount === 1 ? '' : 's') + ' for journal upload.',
+              false
+            );
+          });
+        });
+
+        document.querySelectorAll('form[data-image-upload-form]').forEach(function (formNode) {
+          formNode.addEventListener('submit', async function (event) {
+            if (!(formNode instanceof HTMLFormElement)) {
+              return;
+            }
+
+            if (formNode.dataset.uploadingBeforeSubmit === 'true') {
+              return;
+            }
+
+            const targetField = formNode.getAttribute('data-image-upload-target');
+            if (!targetField) {
+              return;
+            }
+
+            const elements = getContentImageUploadElements(formNode, targetField);
+            const fileInput = elements && elements.fileInput;
+            const hasPendingFile =
+              fileInput instanceof HTMLInputElement &&
+              Boolean(fileInput.files && fileInput.files.length);
+
+            if (!hasPendingFile) {
+              return;
+            }
+
+            event.preventDefault();
+
+            try {
+              await uploadContentImageForField(formNode, targetField, { clearSelection: true });
+              formNode.dataset.uploadingBeforeSubmit = 'true';
+              formNode.submit();
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Upload failed.';
+              setInlineUploadStatus(targetField, message, 'error');
+              setStatus(message, true);
+            } finally {
+              delete formNode.dataset.uploadingBeforeSubmit;
             }
           });
         });
@@ -2235,42 +2598,81 @@ app.get('/admin', async (req, res, next) => {
             return;
           }
 
+          const openFolderButton = event.target.closest('[data-open-folder]');
+          if (openFolderButton) {
+            event.preventDefault();
+            await refreshUploads(openFolderButton.getAttribute('data-open-folder') || '');
+            return;
+          }
+
           const deleteButton = event.target.closest('[data-delete-upload]');
-          if (!deleteButton) {
-            return;
-          }
-
-          event.preventDefault();
-          const targetPath = deleteButton.getAttribute('data-delete-upload');
-          if (!targetPath) {
-            setStatus('Unable to identify file to delete.', true);
-            return;
-          }
-
-          try {
-            setStatus('Deleting upload...', false);
-            const response = await fetch('/api/uploads?path=' + encodeURIComponent(targetPath), {
-              method: 'DELETE',
-              cache: 'no-store',
-              credentials: 'same-origin',
-            });
-
-            if (!response.ok) {
-              const payload = await response.json().catch(() => ({}));
-              throw new Error(payload && payload.message ? payload.message : 'Delete failed.');
+          if (deleteButton) {
+            event.preventDefault();
+            const targetPath = deleteButton.getAttribute('data-delete-upload');
+            if (!targetPath) {
+              setStatus('Unable to identify file to delete.', true);
+              return;
             }
 
-            setStatus('Upload deleted. Refreshing list...', false);
-            await refreshUploads();
-          } catch (error) {
-            const message = error instanceof Error ? error.message : 'Delete failed.';
-            setStatus(message, true);
+            try {
+              setStatus('Deleting file...', false);
+              const response = await fetch('/api/uploads/files?path=' + encodeURIComponent(targetPath), {
+                method: 'DELETE',
+                cache: 'no-store',
+                credentials: 'same-origin',
+              });
+
+              if (!response.ok) {
+                const payload = await response.json().catch(() => ({}));
+                throw new Error(payload && payload.message ? payload.message : 'Delete failed.');
+              }
+
+              setStatus('File deleted. Refreshing folder...', false);
+              await refreshUploads(currentUploadsPath);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Delete failed.';
+              setStatus(message, true);
+            }
+            return;
+          }
+
+          const deleteFolderButton = event.target.closest('[data-delete-folder]');
+          if (deleteFolderButton) {
+            event.preventDefault();
+            const targetPath = deleteFolderButton.getAttribute('data-delete-folder');
+            if (!targetPath) {
+              setStatus('Unable to identify folder to delete.', true);
+              return;
+            }
+
+            try {
+              setStatus('Deleting folder...', false);
+              const response = await fetch('/api/uploads/folders?path=' + encodeURIComponent(targetPath), {
+                method: 'DELETE',
+                cache: 'no-store',
+                credentials: 'same-origin',
+              });
+
+              if (!response.ok) {
+                const payload = await response.json().catch(() => ({}));
+                throw new Error(payload && payload.message ? payload.message : 'Delete failed.');
+              }
+
+              const currentNormalized = normalizeUploadsPath(currentUploadsPath);
+              const deletedNormalized = normalizeUploadsPath(targetPath);
+              const shouldMoveUp = currentNormalized === deletedNormalized || currentNormalized.startsWith(deletedNormalized + '/');
+              setStatus('Folder deleted. Refreshing folder...', false);
+              await refreshUploads(shouldMoveUp ? getParentUploadsPath(deletedNormalized) : currentUploadsPath);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Delete failed.';
+              setStatus(message, true);
+            }
           }
         });
 
         if (createUploadFolderButton) {
           createUploadFolderButton.addEventListener('click', async function () {
-            const folderName = uploadsFolderInput && uploadsFolderInput instanceof HTMLInputElement ? uploadsFolderInput.value.trim() : '';
+            const folderName = normalizeUploadsPath(uploadsFolderInput && uploadsFolderInput instanceof HTMLInputElement ? uploadsFolderInput.value.trim() : currentUploadsPath);
             if (!folderName) {
               setStatus('Enter a folder path first.', true);
               return;
@@ -2292,11 +2694,23 @@ app.get('/admin', async (req, res, next) => {
               }
 
               setStatus('Folder created: ' + payload.path, false);
-              refreshUploads();
+              await refreshUploads(payload.path);
             } catch (error) {
               const message = error instanceof Error ? error.message : 'Could not create folder.';
               setStatus(message, true);
             }
+          });
+        }
+
+        if (uploadsGoRootButton) {
+          uploadsGoRootButton.addEventListener('click', function () {
+            refreshUploads('');
+          });
+        }
+
+        if (uploadsGoParentButton) {
+          uploadsGoParentButton.addEventListener('click', function () {
+            refreshUploads(getParentUploadsPath(currentUploadsPath));
           });
         }
 
@@ -2573,6 +2987,9 @@ app.get('/admin', async (req, res, next) => {
             }
 
             try {
+              if (uploadButton instanceof HTMLButtonElement) {
+                uploadButton.disabled = true;
+              }
               setStatus('Uploading image' + (selectedFiles.length > 1 ? 's' : '') + '...', false);
               const uploadedUrls = await uploadMultipleImages(selectedFiles);
 
@@ -2589,12 +3006,19 @@ app.get('/admin', async (req, res, next) => {
                 });
               }
 
+              if (fileInput instanceof HTMLInputElement) {
+                fileInput.value = '';
+              }
               renderJournalEditor();
-              refreshUploads();
+              await refreshUploads(currentUploadsPath);
               setStatus('Uploaded ' + uploadedUrls.length + ' image' + (uploadedUrls.length === 1 ? '' : 's') + ' into the journal post.', false);
             } catch (error) {
               const message = error instanceof Error ? error.message : 'Upload failed.';
               setStatus(message, true);
+            } finally {
+              if (uploadButton instanceof HTMLButtonElement) {
+                uploadButton.disabled = false;
+              }
             }
           });
 
@@ -2648,7 +3072,7 @@ app.get('/admin', async (req, res, next) => {
             const snippet = snippets[snippetType] ?? '';
             const existing = String(bodyField.value || '');
             bodyField.value = existing
-              ? existing.replace(/\s*$/, '') + '\\n\\n' + snippet
+              ? existing.replace(/\\s*$/, '') + '\\n\\n' + snippet
               : snippet;
             triggerFieldChange(bodyField);
             bodyField.focus();
@@ -2758,6 +3182,18 @@ app.get('/admin', async (req, res, next) => {
         }
 
         if (journalDeviceUploadInput instanceof HTMLInputElement) {
+          journalDeviceUploadInput.addEventListener('change', function () {
+            const selectedCount = journalDeviceUploadInput.files ? journalDeviceUploadInput.files.length : 0;
+            if (selectedCount === 0) {
+              return;
+            }
+
+            setStatus(
+              'Selected ' + selectedCount + ' image' + (selectedCount === 1 ? '' : 's') + ' from this device.',
+              false
+            );
+          });
+
           const handleJournalDeviceUpload = async function (mode) {
             const files = journalDeviceUploadInput.files ? Array.from(journalDeviceUploadInput.files) : [];
             if (files.length === 0) {
@@ -2812,7 +3248,7 @@ app.get('/admin', async (req, res, next) => {
 
               journalDeviceUploadInput.value = '';
               renderJournalEditor();
-              refreshUploads();
+              await refreshUploads(currentUploadsPath);
               setStatus('Uploaded ' + uploadedUrls.length + ' image' + (uploadedUrls.length === 1 ? '' : 's') + ' from this device.', false);
             } catch (error) {
               const message = error instanceof Error ? error.message : 'Upload failed.';
@@ -2841,6 +3277,22 @@ app.get('/admin', async (req, res, next) => {
 
         if (uploadsSearchInput) {
           uploadsSearchInput.addEventListener('input', renderUploads);
+        }
+
+        if (uploadsPathbarEl) {
+          uploadsPathbarEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const breadcrumbButton = event.target.closest('[data-open-folder]');
+            if (!breadcrumbButton) {
+              return;
+            }
+
+            event.preventDefault();
+            refreshUploads(breadcrumbButton.getAttribute('data-open-folder') || '');
+          });
         }
 
         if (uploadsListEl) {
@@ -3470,7 +3922,7 @@ app.get('/api/craftsmanship', async (_req, res, next) => {
   }
 });
 
-app.get('/api/uploads', async (req, res, next) => {
+app.get('/api/uploads/tree', async (req, res, next) => {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) {
@@ -3479,10 +3931,10 @@ app.get('/api/uploads', async (req, res, next) => {
     }
 
     const requestedPath = typeof req.query.path === 'string' ? req.query.path : undefined;
-    const uploads = await listUploads(uploadsDir, { path: requestedPath });
-    res.json(uploads);
+    const entries = await listUploadEntries(uploadsDir, { path: requestedPath });
+    res.json(entries);
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Invalid')) {
+    if (error instanceof Error && isUploadClientErrorMessage(error.message)) {
       res.status(400).json({ message: error.message });
       return;
     }
@@ -3491,7 +3943,39 @@ app.get('/api/uploads', async (req, res, next) => {
   }
 });
 
-app.post('/api/uploads', async (req, res, next) => {
+app.get('/api/uploads/image', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const requestedPath = typeof req.query.path === 'string' ? req.query.path : undefined;
+    const file = await getUploadFile(requestedPath, uploadsDir);
+    res.set({
+      'Content-Type': file.mimeType,
+      'Content-Length': String(file.size),
+      'Content-Disposition': `inline; filename="${file.name.replace(/"/g, '')}"`,
+      'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+    });
+    res.sendFile(file.absolutePath);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'File not found.') {
+      res.status(404).json({ message: error.message });
+      return;
+    }
+
+    if (error instanceof Error && isUploadClientErrorMessage(error.message)) {
+      res.status(400).json({ message: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/uploads/files', async (req, res, next) => {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) {
@@ -3502,7 +3986,7 @@ app.post('/api/uploads', async (req, res, next) => {
     const uploaded = await saveUploadedImage(req.body);
     res.status(201).json(uploaded);
   } catch (error) {
-    if (error instanceof Error && (error.message.startsWith('Invalid') || error.message.startsWith('Missing') || error.message.startsWith('File not found'))) {
+    if (error instanceof Error && isUploadClientErrorMessage(error.message)) {
       res.status(400).json({ message: error.message });
       return;
     }
@@ -3511,7 +3995,7 @@ app.post('/api/uploads', async (req, res, next) => {
   }
 });
 
-app.delete('/api/uploads', async (req, res, next) => {
+app.delete('/api/uploads/files', async (req, res, next) => {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) {
@@ -3525,7 +4009,7 @@ app.delete('/api/uploads', async (req, res, next) => {
       return;
     }
 
-    await deleteUpload(requestedPath);
+    await deleteUpload(requestedPath, uploadsDir);
     res.status(204).end();
   } catch (error) {
     if (error instanceof Error && error.message === 'File not found.') {
@@ -3533,7 +4017,7 @@ app.delete('/api/uploads', async (req, res, next) => {
       return;
     }
 
-    if (error instanceof Error && error.message.startsWith('Invalid')) {
+    if (error instanceof Error && isUploadClientErrorMessage(error.message)) {
       res.status(400).json({ message: error.message });
       return;
     }
@@ -3554,7 +4038,38 @@ app.post('/api/uploads/folders', async (req, res, next) => {
     const created = await createUploadFolder(payload.folder);
     res.status(201).json(created);
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Invalid')) {
+    if (error instanceof Error && isUploadClientErrorMessage(error.message)) {
+      res.status(400).json({ message: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.delete('/api/uploads/folders', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const requestedPath = typeof req.query.path === 'string' ? req.query.path : undefined;
+    if (!requestedPath) {
+      res.status(400).json({ message: 'Missing path.' });
+      return;
+    }
+
+    await deleteUploadFolder(requestedPath, uploadsDir);
+    res.status(204).end();
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Folder not found.') {
+      res.status(404).json({ message: error.message });
+      return;
+    }
+
+    if (error instanceof Error && isUploadClientErrorMessage(error.message)) {
       res.status(400).json({ message: error.message });
       return;
     }

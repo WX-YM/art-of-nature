@@ -3,7 +3,15 @@ import assert from 'node:assert/strict';
 import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { saveUploadedImage, listUploads, deleteUpload, createUploadFolder } from '../server/upload-service';
+import {
+  saveUploadedImage,
+  listUploads,
+  listUploadEntries,
+  getUploadFile,
+  deleteUpload,
+  createUploadFolder,
+  deleteUploadFolder,
+} from '../server/upload-service';
 
 const minimalPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
 const minimalJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0xff, 0xd9]);
@@ -123,5 +131,75 @@ test('saveUploadedImage saves nested uploads into folders and deleteUpload remov
   assert.equal(remaining.length, 0);
 
   // cleanup
+  await rm(dir, { recursive: true, force: true });
+});
+
+test('listUploadEntries returns folders and files for a target directory', async () => {
+  const dir = generateRandomDir();
+  await createUploadFolder('nested/album', dir);
+  await saveUploadedImage(
+    {
+      folder: 'nested/album',
+      fileName: 'preview.png',
+      mimeType: 'image/png',
+      base64Data: minimalPng.toString('base64'),
+    },
+    dir
+  );
+
+  const rootEntries = await listUploadEntries(dir);
+  assert.equal(rootEntries.length, 1);
+  assert.equal(rootEntries[0].type, 'directory');
+  assert.equal(rootEntries[0].name, 'nested');
+
+  const nestedEntries = await listUploadEntries(dir, { path: 'nested/album' });
+  assert.equal(nestedEntries.length, 1);
+  assert.equal(nestedEntries[0].type, 'file');
+  assert.equal(nestedEntries[0].mimeType, 'image/png');
+  assert.equal(nestedEntries[0].folder, 'nested/album');
+
+  await rm(dir, { recursive: true, force: true });
+});
+
+test('getUploadFile returns file metadata for a stored image', async () => {
+  const dir = generateRandomDir();
+  const created = await saveUploadedImage(
+    {
+      folder: 'journal/covers',
+      fileName: 'cover-image.jpeg',
+      mimeType: 'image/jpeg',
+      base64Data: minimalJpeg.toString('base64'),
+    },
+    dir
+  );
+
+  const relativePath = created.url.replace(/^\/uploads\//, '');
+  const file = await getUploadFile(relativePath, dir);
+
+  assert.equal(file.folder, 'journal/covers');
+  assert.equal(file.mimeType, 'image/jpeg');
+  assert.equal(file.url, created.url);
+  assert.equal(file.path, relativePath);
+
+  await rm(dir, { recursive: true, force: true });
+});
+
+test('deleteUploadFolder removes a nested folder recursively', async () => {
+  const dir = generateRandomDir();
+  await createUploadFolder('gallery/outdoor', dir);
+  await saveUploadedImage(
+    {
+      folder: 'gallery/outdoor',
+      mimeType: 'image/png',
+      base64Data: minimalPng.toString('base64'),
+    },
+    dir
+  );
+
+  await deleteUploadFolder('gallery', dir);
+
+  const entries = await listUploadEntries(dir);
+  assert.equal(entries.length, 0);
+
   await rm(dir, { recursive: true, force: true });
 });

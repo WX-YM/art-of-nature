@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const uploadsDir = path.resolve(__dirname, '..', 'uploads');
-export const maxUploadSizeBytes = 8 * 1024 * 1024;
+export const maxUploadSizeBytes = 20 * 1024 * 1024;
 
 export const allowedImageMimeToExtension: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -31,6 +31,33 @@ export type UploadListEntry = {
   uploadedAt: string;
 };
 
+export type UploadDirectoryEntry = {
+  type: 'directory';
+  name: string;
+  path: string;
+  folder: string;
+  itemCount: number;
+  uploadedAt: string;
+};
+
+export type UploadFileEntry = UploadListEntry & {
+  type: 'file';
+  mimeType: string;
+};
+
+export type UploadEntry = UploadDirectoryEntry | UploadFileEntry;
+
+export type UploadFileRecord = {
+  absolutePath: string;
+  name: string;
+  path: string;
+  folder: string;
+  url: string;
+  size: number;
+  uploadedAt: string;
+  mimeType: string;
+};
+
 const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const jpegSignature = Buffer.from([0xff, 0xd8, 0xff]);
 const gif87aSignature = Buffer.from('GIF87a', 'ascii');
@@ -39,6 +66,14 @@ const riffSignature = Buffer.from('RIFF', 'ascii');
 const webpSignature = Buffer.from('WEBP', 'ascii');
 const ftypSignature = Buffer.from('ftyp', 'ascii');
 const avifBrands = new Set(['avif', 'avis']);
+const extensionToMimeType: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  avif: 'image/avif',
+};
 
 function bufferStartsWith(buffer: Buffer, signature: Buffer) {
   return buffer.length >= signature.length && buffer.subarray(0, signature.length).equals(signature);
@@ -84,6 +119,27 @@ function normalizeRelativePath(value: unknown): string {
   }
 
   return segments.join('/');
+}
+
+function toRelativeUploadPath(rootDir: string, targetPath: string) {
+  return path.relative(rootDir, targetPath).split(path.sep).join('/');
+}
+
+function buildUploadUrl(relativePath: string) {
+  return `/uploads/${relativePath
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')}`;
+}
+
+function getFolderLabel(relativePath: string) {
+  const folderPath = path.dirname(relativePath).split(path.sep).join('/');
+  return folderPath === '.' ? '' : folderPath;
+}
+
+function getMimeTypeFromFileName(fileName: string) {
+  const extension = path.extname(fileName).slice(1).toLowerCase();
+  return extensionToMimeType[extension] ?? 'application/octet-stream';
 }
 
 function resolveUploadDirectory(relativeFolder: unknown, rootDir: string) {
@@ -161,11 +217,61 @@ export async function saveUploadedImage(
   await mkdir(uploadDir, { recursive: true });
   await writeFile(path.resolve(uploadDir, uploadedName), fileBuffer);
 
-  const relativePath = path.relative(targetDir, path.resolve(uploadDir, uploadedName)).split(path.sep).join('/');
+  const relativePath = toRelativeUploadPath(targetDir, path.resolve(uploadDir, uploadedName));
 
   return {
-    url: `/uploads/${relativePath}`,
+    url: buildUploadUrl(relativePath),
   };
+}
+
+export async function listUploadEntries(
+  targetDir: string = uploadsDir,
+  options?: { path?: unknown }
+): Promise<UploadEntry[]> {
+  const rootDir = resolveUploadDirectory(options?.path, targetDir);
+  await mkdir(rootDir, { recursive: true });
+
+  const names = await readdir(rootDir);
+  const entries = await Promise.all(
+    names.map(async (name) => {
+      const fullPath = path.resolve(rootDir, name);
+      const fileStats = await stat(fullPath);
+      const relativePath = toRelativeUploadPath(targetDir, fullPath);
+      const folder = getFolderLabel(relativePath);
+
+      if (fileStats.isDirectory()) {
+        const childNames = await readdir(fullPath);
+
+        return {
+          type: 'directory' as const,
+          name,
+          path: relativePath,
+          folder,
+          itemCount: childNames.length,
+          uploadedAt: fileStats.mtime.toISOString(),
+        };
+      }
+
+      return {
+        type: 'file' as const,
+        name,
+        path: relativePath,
+        folder,
+        url: buildUploadUrl(relativePath),
+        size: fileStats.size,
+        uploadedAt: fileStats.mtime.toISOString(),
+        mimeType: getMimeTypeFromFileName(name),
+      };
+    })
+  );
+
+  return entries.sort((left, right) => {
+    if (left.type !== right.type) {
+      return left.type === 'directory' ? -1 : 1;
+    }
+
+    return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
+  });
 }
 
 export async function listUploads(targetDir: string = uploadsDir, options?: { path?: unknown }) {
@@ -181,8 +287,8 @@ export async function listUploads(targetDir: string = uploadsDir, options?: { pa
       names.map(async (name) => {
         const fullPath = path.resolve(currentDir, name);
         const fileStats = await stat(fullPath);
-        const relativePath = path.relative(targetDir, fullPath).split(path.sep).join('/');
-        const folderPath = path.dirname(relativePath).split(path.sep).join('/');
+        const relativePath = toRelativeUploadPath(targetDir, fullPath);
+        const folderPath = getFolderLabel(relativePath);
 
         if (fileStats.isDirectory()) {
           await walk(fullPath);
@@ -192,11 +298,8 @@ export async function listUploads(targetDir: string = uploadsDir, options?: { pa
         files.push({
           name: path.basename(relativePath),
           path: relativePath,
-          folder: folderPath === '.' ? '' : folderPath,
-          url: `/uploads/${relativePath
-            .split('/')
-            .map((segment) => encodeURIComponent(segment))
-            .join('/')}`,
+          folder: folderPath,
+          url: buildUploadUrl(relativePath),
           size: fileStats.size,
           uploadedAt: fileStats.mtime.toISOString(),
         });
@@ -213,11 +316,11 @@ export async function createUploadFolder(relativeFolder: unknown, targetDir: str
   const folderPath = resolveUploadDirectory(relativeFolder, targetDir);
   await mkdir(folderPath, { recursive: true });
   return {
-    path: path.relative(targetDir, folderPath).split(path.sep).join('/'),
+    path: toRelativeUploadPath(targetDir, folderPath),
   };
 }
 
-export async function deleteUpload(relativePath: unknown, targetDir: string = uploadsDir) {
+export async function getUploadFile(relativePath: unknown, targetDir: string = uploadsDir): Promise<UploadFileRecord> {
   const fullPath = resolveUploadFilePath(relativePath, targetDir);
   const fileStats = await stat(fullPath).catch(() => null);
 
@@ -225,5 +328,40 @@ export async function deleteUpload(relativePath: unknown, targetDir: string = up
     throw new Error('File not found.');
   }
 
-  await rm(fullPath);
+  const normalizedPath = toRelativeUploadPath(targetDir, fullPath);
+  const name = path.basename(normalizedPath);
+
+  return {
+    absolutePath: fullPath,
+    name,
+    path: normalizedPath,
+    folder: getFolderLabel(normalizedPath),
+    url: buildUploadUrl(normalizedPath),
+    size: fileStats.size,
+    uploadedAt: fileStats.mtime.toISOString(),
+    mimeType: getMimeTypeFromFileName(name),
+  };
+}
+
+export async function deleteUpload(relativePath: unknown, targetDir: string = uploadsDir) {
+  const file = await getUploadFile(relativePath, targetDir);
+
+  await rm(file.absolutePath);
+}
+
+export async function deleteUploadFolder(relativeFolder: unknown, targetDir: string = uploadsDir) {
+  const normalizedFolder = normalizeRelativePath(relativeFolder);
+
+  if (!normalizedFolder) {
+    throw new Error('Missing path.');
+  }
+
+  const folderPath = resolveUploadDirectory(normalizedFolder, targetDir);
+  const folderStats = await stat(folderPath).catch(() => null);
+
+  if (!folderStats || !folderStats.isDirectory()) {
+    throw new Error('Folder not found.');
+  }
+
+  await rm(folderPath, { recursive: true, force: false });
 }
