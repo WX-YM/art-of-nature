@@ -7,6 +7,7 @@ import { createServer as createViteServer } from 'vite';
 import { connectToDatabase } from './db';
 import { getHeroContent, upsertHeroContent } from './hero-content-service';
 import { getGalleryContent, normalizeGalleryContent, upsertGalleryContent } from './gallery-content-service';
+import { getJournalContent, normalizeJournalContent, upsertJournalContent } from './journal-content-service';
 import { render as renderApp } from '../src/entry-server';
 import { defaultGalleryContent, type GalleryContent, type GalleryPiece } from '../src/app/lib/gallery';
 import { defaultHeroContent, type HeroContent } from '../src/app/lib/heroContent';
@@ -16,6 +17,13 @@ import { getContactContent, upsertContactContent } from './contact-content-servi
 import { defaultContactContent, type ContactContent } from '../src/app/lib/contactContent';
 import { getCraftsmanshipContent, upsertCraftsmanshipContent } from './craftsmanship-content-service';
 import { defaultCraftsmanshipContent, type CraftsmanshipContent } from '../src/app/lib/craftsmanshipContent';
+import {
+  defaultJournalContent,
+  getJournalPostBySlug,
+  slugifyJournalValue,
+  type JournalContent,
+  type JournalPost,
+} from '../src/app/lib/journal';
 import { createContactMessage } from './contact-message-service';
 import { getVisitCount, incrementVisitCount } from './site-visit-service';
 import { ContactMessageModel } from './models/ContactMessage';
@@ -123,7 +131,7 @@ function getGoogleOAuthRedirectUri(req: express.Request) {
   return `${req.protocol}://${req.get('host')}/admin/email/google/callback`;
 }
 
-function slugifyGalleryPieceId(value: string) {
+function slugifyEditorValue(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
@@ -185,7 +193,7 @@ function parseGalleryPiecesJson(body: unknown): GalleryPiece[] {
           : title;
 
       return {
-        id: slugifyGalleryPieceId(idSource),
+        id: slugifyEditorValue(idSource),
         title,
         category,
         subcategory,
@@ -198,6 +206,91 @@ function parseGalleryPiecesJson(body: unknown): GalleryPiece[] {
       } as GalleryPiece;
     })
     .filter((piece): piece is GalleryPiece => piece !== null);
+}
+
+function parseJournalPostsJson(body: unknown): JournalPost[] {
+  if (!body || typeof body !== 'object') {
+    throw new Error('Invalid journal posts.');
+  }
+
+  const raw = (body as Record<string, unknown>).journalPostsJson;
+  if (typeof raw !== 'string' || raw.length > 2_000_000) {
+    throw new Error('Invalid journal posts.');
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('Invalid journal posts.');
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error('Invalid journal posts.');
+  }
+
+  return parsed
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return null;
+      }
+
+      const rawPost = entry as Record<string, unknown>;
+      const title = typeof rawPost.title === 'string' ? rawPost.title.trim() : '';
+      const excerpt = typeof rawPost.excerpt === 'string' ? rawPost.excerpt.trim() : '';
+      const category = typeof rawPost.category === 'string' ? rawPost.category.trim() : '';
+      const publishedAt = typeof rawPost.publishedAt === 'string' ? rawPost.publishedAt.trim() : '';
+      const coverImageUrl =
+        typeof rawPost.coverImageUrl === 'string' ? rawPost.coverImageUrl.trim() : '';
+      const coverImageAlt =
+        typeof rawPost.coverImageAlt === 'string' ? rawPost.coverImageAlt.trim() : '';
+      const bodyText = typeof rawPost.body === 'string' ? rawPost.body.trim() : '';
+      const published = rawPost.published !== false;
+      const featured = rawPost.featured === true;
+      const galleryImageUrls = Array.isArray(rawPost.galleryImageUrls)
+        ? rawPost.galleryImageUrls
+            .map((item) => (typeof item === 'string' ? item.trim() : ''))
+            .filter(Boolean)
+        : [];
+
+      if (!title || !excerpt || !category || !publishedAt || !coverImageUrl || !bodyText) {
+        return null;
+      }
+
+      const idSource =
+        typeof rawPost.id === 'string' && rawPost.id.trim()
+          ? rawPost.id.trim()
+          : typeof rawPost.slug === 'string' && rawPost.slug.trim()
+            ? rawPost.slug.trim()
+            : title;
+      const slugSource =
+        typeof rawPost.slug === 'string' && rawPost.slug.trim()
+          ? rawPost.slug.trim()
+          : title;
+
+      const id = slugifyEditorValue(idSource);
+      const slug = slugifyJournalValue(slugSource);
+
+      if (!id || !slug) {
+        return null;
+      }
+
+      return {
+        id,
+        slug,
+        title,
+        excerpt,
+        category,
+        publishedAt,
+        featured,
+        published,
+        coverImageUrl,
+        coverImageAlt: coverImageAlt || `${title} cover image`,
+        galleryImageUrls: Array.from(new Set([coverImageUrl, ...galleryImageUrls])),
+        body: bodyText,
+      } as JournalPost;
+    })
+    .filter((post): post is JournalPost => post !== null);
 }
 
 import {
@@ -277,7 +370,10 @@ app.get('/admin', async (req, res, next) => {
 
     const adminUrl = new URL(req.originalUrl, 'http://localhost');
     const requestedTab = adminUrl.searchParams.get('tab');
-    const activeTab = requestedTab === 'messages' || requestedTab === 'gallery' ? requestedTab : 'content';
+    const activeTab =
+      requestedTab === 'messages' || requestedTab === 'gallery' || requestedTab === 'journal'
+        ? requestedTab
+        : 'content';
     const searchQuery = adminUrl.searchParams.get('q')?.trim() ?? '';
     const messageStatusFilter = adminUrl.searchParams.get('messageStatus');
     const statusFilter = isMessageStatus(messageStatusFilter) ? messageStatusFilter : 'all';
@@ -298,12 +394,13 @@ app.get('/admin', async (req, res, next) => {
       ];
     }
 
-    const [totalVisits, totalContactMessages, hero, about, gallery, contact, craftsmanship, contactMessages, forwardingSettingsDoc] = await Promise.all([
+    const [totalVisits, totalContactMessages, hero, about, gallery, journal, contact, craftsmanship, contactMessages, forwardingSettingsDoc] = await Promise.all([
       getVisitCount(),
       ContactMessageModel.countDocuments(),
       getHeroContent(),
       getAboutContent(),
       getGalleryContent(),
+      getJournalContent(),
       getContactContent(),
       getCraftsmanshipContent(),
       activeTab === 'messages'
@@ -362,6 +459,23 @@ app.get('/admin', async (req, res, next) => {
         imageUrls: piece.images.map((image) => image.src),
       })),
       categories: gallery.categories,
+    };
+
+    const journalEditorState = {
+      posts: journal.posts.map((post) => ({
+        id: post.id,
+        slug: post.slug,
+        title: post.title,
+        excerpt: post.excerpt,
+        category: post.category,
+        publishedAt: post.publishedAt,
+        featured: post.featured === true,
+        published: post.published !== false,
+        coverImageUrl: post.coverImageUrl,
+        coverImageAlt: post.coverImageAlt,
+        galleryImageUrls: post.galleryImageUrls,
+        body: post.body,
+      })),
     };
 
     const messageRowsHtml =
@@ -660,6 +774,115 @@ app.get('/admin', async (req, res, next) => {
         text-align: center;
         background: rgba(255,255,255,0.55);
       }
+      .journal-editor-lead {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 0.8fr);
+        align-items: start;
+        margin: 1rem 0 1.15rem;
+      }
+      .journal-workflow-card,
+      .journal-builder-card,
+      .journal-preview-card {
+        border: 1px solid var(--admin-border);
+        border-radius: 18px;
+        background: rgba(255,255,255,0.76);
+        padding: 1rem;
+      }
+      .journal-workflow-card strong,
+      .journal-builder-card strong {
+        display: block;
+        margin-bottom: 0.35rem;
+        color: var(--admin-accent-dark);
+      }
+      .journal-workflow-list {
+        margin: 0.75rem 0 0 0;
+        padding-left: 1rem;
+        color: var(--admin-muted);
+        display: grid;
+        gap: 0.5rem;
+        line-height: 1.6;
+      }
+      .journal-builder-grid {
+        display: grid;
+        gap: 0.75rem;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        align-items: end;
+      }
+      .journal-inline-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+      .journal-summary-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.45rem;
+      }
+      .journal-preview-card {
+        display: grid;
+        gap: 0.85rem;
+        grid-template-columns: minmax(110px, 0.9fr) minmax(0, 1.1fr);
+      }
+      .journal-preview-card img {
+        width: 100%;
+        height: 100%;
+        min-height: 9rem;
+        object-fit: cover;
+        border-radius: 12px;
+        background: #f3f4f6;
+      }
+      .journal-preview-kicker {
+        color: var(--admin-muted);
+        font-size: 0.7rem;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+      }
+      .journal-preview-title {
+        font-family: var(--admin-serif);
+        font-size: 1.45rem;
+        line-height: 1.05;
+        color: var(--admin-accent-dark);
+      }
+      .journal-preview-copy {
+        color: var(--admin-muted);
+        font-size: 0.88rem;
+        line-height: 1.7;
+      }
+      .journal-field-stack {
+        display: grid;
+        gap: 0.75rem;
+      }
+      .journal-upload-row {
+        display: grid;
+        gap: 0.6rem;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        align-items: end;
+      }
+      .body-tools {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        margin: 0.5rem 0 0.7rem;
+      }
+      .body-tools button,
+      .journal-inline-actions button,
+      .journal-summary-actions button {
+        padding: 0.58rem 0.8rem;
+        font-size: 0.68rem;
+      }
+      .journal-preview-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        color: var(--admin-accent-dark);
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        text-decoration: none;
+      }
       .checkbox-row { display: flex; align-items: center; gap: 0.55rem; color: var(--admin-text); }
       .checkbox-row input { width: auto; margin: 0; }
       .ghost-button { background: rgba(255,255,255,0.88); color: var(--admin-accent-dark); border: 1px solid var(--admin-border-strong); }
@@ -715,6 +938,9 @@ app.get('/admin', async (req, res, next) => {
         main { margin: 1rem; padding: 1rem; border-radius: 22px; }
         .section-grid.two, .piece-grid, .messages-toolbar, .upload-library-toolbar { grid-template-columns: 1fr; }
         .upload-row { grid-template-columns: 1fr; }
+        .journal-editor-lead,
+        .journal-preview-card,
+        .journal-upload-row { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -734,6 +960,7 @@ app.get('/admin', async (req, res, next) => {
       <nav class="tab-row">
         <a class="tab-link ${activeTab === 'content' ? 'active' : ''}" href="/admin?tab=content">Content</a>
         <a class="tab-link ${activeTab === 'gallery' ? 'active' : ''}" href="/admin?tab=gallery">Gallery</a>
+        <a class="tab-link ${activeTab === 'journal' ? 'active' : ''}" href="/admin?tab=journal">Journal</a>
         <a class="tab-link ${activeTab === 'messages' ? 'active' : ''}" href="/admin?tab=messages">Contact Messages</a>
       </nav>
       ${
@@ -904,6 +1131,88 @@ app.get('/admin', async (req, res, next) => {
         <div id="uploads-list" class="uploads-list"></div>
       </section>
       ` : ''}
+      ${activeTab === 'journal' ? `
+      <section>
+        <p class="admin-eyebrow" style="margin-top:0;">Journal</p>
+        <h2>Journal Editor</h2>
+        <p class="section-intro">Manage the homepage journal preview, the full journal page, and individual article entries from one editor. Posts can be drafted, published, featured, reordered, edited, or removed without code changes.</p>
+        <form id="journal-content-form" method="post" action="/admin/content/journal">
+          <div class="section-grid two">
+            <p><label>Homepage Eyebrow<br /><input name="journalPreviewEyebrow" required value="${escapeHtml(journal.previewEyebrow)}" /></label></p>
+            <p><label>Homepage Heading<br /><input name="journalPreviewHeading" required value="${escapeHtml(journal.previewHeading)}" /></label></p>
+            <p class="full" style="grid-column:1 / -1;"><label>Homepage Description<br /><textarea name="journalPreviewDescription" required style="min-height:90px;">${escapeHtml(journal.previewDescription)}</textarea></label></p>
+            <p><label>Journal Page Eyebrow<br /><input name="journalPageEyebrow" required value="${escapeHtml(journal.pageEyebrow)}" /></label></p>
+            <p><label>Journal Page Heading<br /><input name="journalPageHeading" required value="${escapeHtml(journal.pageHeading)}" /></label></p>
+            <p class="full" style="grid-column:1 / -1;"><label>Journal Page Description<br /><textarea name="journalPageDescription" required style="min-height:100px;">${escapeHtml(journal.pageDescription)}</textarea></label></p>
+          </div>
+
+          <div class="journal-editor-lead">
+            <div class="journal-workflow-card">
+              <strong>Build The Article Like A Story</strong>
+              <p class="upload-help" style="margin:0;">Each journal entry supports a lead image, supporting archive frames, publishing controls, and a body with elegant markdown-like structure.</p>
+              <ul class="journal-workflow-list">
+                <li>Use <code>## Heading</code> for section titles.</li>
+                <li>Use <code>&gt; Quote</code> for pull quotes.</li>
+                <li>Use <code>- Item</code> for clean editorial lists.</li>
+                <li>Draft privately first, then publish when ready.</li>
+              </ul>
+            </div>
+            <div class="journal-builder-card">
+              <strong>Upload From This Device</strong>
+              <p class="upload-help" style="margin:0 0 0.75rem 0;">Choose an image from a laptop, phone, or tablet, then send it directly into the selected journal field and store it in the shared uploads archive.</p>
+              <div class="journal-builder-grid">
+                <p style="margin:0;"><label>Image File<br /><input type="file" id="journal-device-upload" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" /></label></p>
+                <div class="journal-inline-actions">
+                  <button type="button" id="journal-upload-to-selected" class="ghost-button">Upload To Selected Field</button>
+                  <button type="button" id="journal-upload-to-cover" class="ghost-button">Upload As Cover</button>
+                  <button type="button" id="journal-upload-to-gallery" class="ghost-button">Upload To Gallery</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="gallery-editor-toolbar">
+            <div class="gallery-toolbar-main">
+              <div>
+                <strong style="display:block; margin-bottom:0.2rem;">Article Archive</strong>
+                <span class="upload-help">Search, filter, and shape each article without touching the layout. Use the body field with simple markdown-like syntax: <code>## heading</code>, <code>&gt; quote</code>, and <code>- list item</code>.</span>
+              </div>
+              <div class="gallery-toolbar-filters">
+                <p style="margin:0;"><label>Search Posts<br /><input type="search" id="journal-post-search" placeholder="Title, category, slug, excerpt" /></label></p>
+                <p style="margin:0;"><label>Status Filter<br />
+                  <select id="journal-post-status-filter">
+                    <option value="all">All posts</option>
+                    <option value="published">Published</option>
+                    <option value="draft">Drafts</option>
+                  </select>
+                </label></p>
+              </div>
+            </div>
+            <div class="toolbar-actions">
+              <span id="journal-post-count" class="count-chip">${journal.posts.length} posts</span>
+              <button type="button" id="journal-expand-all" class="ghost-button">Expand</button>
+              <button type="button" id="journal-collapse-all" class="ghost-button">Collapse</button>
+              <button type="button" id="journal-add-post" class="ghost-button">Add Article</button>
+            </div>
+          </div>
+
+          <textarea id="journal-posts-json" name="journalPostsJson" hidden></textarea>
+          <div id="journal-post-editor" class="gallery-piece-editor"></div>
+
+          <p style="margin-top:1rem;"><button type="submit">Save Journal</button></p>
+        </form>
+      </section>
+      <section>
+        <h2>Image Library</h2>
+        <p class="section-intro">Select a cover image field or article gallery field, then reuse assets from the archive directly inside the journal editor.</p>
+        <div class="upload-library-toolbar">
+          <p style="margin:0;"><label>Search Archive<br /><input type="search" id="uploads-search" placeholder="Filename, folder, or URL" /></label></p>
+          <p class="upload-help" style="margin:0;">Click into a Journal cover image or Gallery Images field first, then use Insert.</p>
+        </div>
+        <p class="upload-help" id="upload-status">Upload a new image or reuse existing archive URLs while editing journal entries.</p>
+        <div id="uploads-list" class="uploads-list"></div>
+      </section>
+      ` : ''}
       ${activeTab === 'messages' ? `
       <section>
         <h2>Contact Messages</h2>
@@ -972,14 +1281,31 @@ app.get('/admin', async (req, res, next) => {
         const galleryPieceCountEl = document.getElementById('gallery-piece-count');
         const galleryForm = document.getElementById('gallery-content-form');
         const galleryPiecesJsonField = document.getElementById('gallery-pieces-json');
+        const journalEditorData = ${serializeForScript(journalEditorState)};
+        const journalEditorEl = document.getElementById('journal-post-editor');
+        const journalAddPostButton = document.getElementById('journal-add-post');
+        const journalExpandAllButton = document.getElementById('journal-expand-all');
+        const journalCollapseAllButton = document.getElementById('journal-collapse-all');
+        const journalPostSearchInput = document.getElementById('journal-post-search');
+        const journalPostStatusFilter = document.getElementById('journal-post-status-filter');
+        const journalPostCountEl = document.getElementById('journal-post-count');
+        const journalForm = document.getElementById('journal-content-form');
+        const journalPostsJsonField = document.getElementById('journal-posts-json');
+        const journalDeviceUploadInput = document.getElementById('journal-device-upload');
+        const journalUploadToSelectedButton = document.getElementById('journal-upload-to-selected');
+        const journalUploadToCoverButton = document.getElementById('journal-upload-to-cover');
+        const journalUploadToGalleryButton = document.getElementById('journal-upload-to-gallery');
         const galleryCategories = Array.isArray(galleryEditorData && galleryEditorData.categories)
           ? galleryEditorData.categories
           : [];
         let galleryPiecesState = Array.isArray(galleryEditorData && galleryEditorData.pieces)
           ? galleryEditorData.pieces.map(normalizeEditorPiece)
           : [];
+        let journalPostsState = Array.isArray(journalEditorData && journalEditorData.posts)
+          ? journalEditorData.posts.map(normalizeJournalEditorPost)
+          : [];
         let cachedUploads = [];
-        let lastFocusedImageUrlsField = null;
+        let lastFocusedUploadField = null;
 
         function escapeHtmlValue(value) {
           return String(value || '')
@@ -1243,7 +1569,264 @@ app.get('/admin', async (req, res, next) => {
             })
             .join('');
 
-          lastFocusedImageUrlsField = null;
+          lastFocusedUploadField = null;
+        }
+
+        function normalizeJournalEditorPost(post) {
+          const title = post && typeof post.title === 'string' ? post.title.trim() : '';
+          const slug = post && typeof post.slug === 'string' ? post.slug.trim() : '';
+          const coverImageUrl =
+            post && typeof post.coverImageUrl === 'string'
+              ? post.coverImageUrl.trim()
+              : '';
+          const galleryImageUrls = Array.isArray(post && post.galleryImageUrls)
+            ? post.galleryImageUrls.map(function (url) { return String(url || '').trim(); }).filter(Boolean)
+            : [];
+
+          return {
+            id: post && typeof post.id === 'string' ? post.id.trim() : '',
+            slug: slug || slugifyPieceId(title),
+            title: title,
+            excerpt: post && typeof post.excerpt === 'string' ? post.excerpt.trim() : '',
+            category: post && typeof post.category === 'string' ? post.category.trim() : '',
+            publishedAt: post && typeof post.publishedAt === 'string' ? post.publishedAt.trim() : new Date().toISOString().slice(0, 10),
+            featured: post && post.featured === true,
+            published: !post || post.published !== false,
+            coverImageUrl: coverImageUrl,
+            coverImageAlt: post && typeof post.coverImageAlt === 'string' ? post.coverImageAlt.trim() : '',
+            galleryImageUrls: Array.from(new Set([coverImageUrl].concat(galleryImageUrls).filter(Boolean))),
+            body: post && typeof post.body === 'string' ? post.body.trim() : '',
+          };
+        }
+
+        function getJournalReadingTime(bodyText) {
+          const wordCount = String(bodyText || '')
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean)
+            .length;
+
+          return Math.max(2, Math.ceil(wordCount / 180));
+        }
+
+        function buildJournalPreviewCardMarkup(post) {
+          const safeCover = escapeHtmlValue(post.coverImageUrl || '');
+          const previewImageMarkup = safeCover
+            ? '<img src="' + safeCover + '" alt="' + escapeHtmlValue(post.coverImageAlt || post.title || 'Preview image') + '" loading="lazy" />'
+            : '<div class="gallery-piece-preview-empty" style="min-height:9rem; display:flex; align-items:center; justify-content:center;">No cover image yet.</div>';
+          const previewHref = post.slug ? '/journal/' + encodeURIComponent(post.slug) : '';
+          const previewMeta = [
+            post.category || 'Uncategorized',
+            post.publishedAt || 'Undated',
+            getJournalReadingTime(post.body) + ' min read',
+            post.published ? 'Published' : 'Draft'
+          ].join(' / ');
+
+          return '<div class="journal-preview-card">' +
+            '<div>' + previewImageMarkup + '</div>' +
+            '<div>' +
+              '<div class="journal-preview-kicker">' + escapeHtmlValue(previewMeta) + (post.featured ? ' / featured' : '') + '</div>' +
+              '<div class="journal-preview-title">' + escapeHtmlValue(post.title || 'Untitled article') + '</div>' +
+              '<p class="journal-preview-copy">' + escapeHtmlValue(post.excerpt || 'Add a short excerpt to shape the preview card and article introduction.') + '</p>' +
+              (previewHref
+                ? '<a class="journal-preview-link" href="' + previewHref + '" target="_blank" rel="noopener">Open Preview</a>'
+                : '<span class="journal-preview-link" style="opacity:0.52;">Add a slug to preview</span>') +
+            '</div>' +
+          '</div>';
+        }
+
+        function isMeaningfulJournalPost(post) {
+          return Boolean(post && (post.title || post.excerpt || post.body || post.coverImageUrl));
+        }
+
+        function getJournalFilterState() {
+          const searchValue =
+            journalPostSearchInput && typeof journalPostSearchInput.value === 'string'
+              ? journalPostSearchInput.value.trim().toLowerCase()
+              : '';
+          const statusValue =
+            journalPostStatusFilter && typeof journalPostStatusFilter.value === 'string'
+              ? journalPostStatusFilter.value
+              : 'all';
+
+          return {
+            searchValue: searchValue,
+            statusValue: statusValue,
+          };
+        }
+
+        function journalPostMatchesFilters(post, filters) {
+          if (filters.statusValue === 'published' && !post.published) {
+            return false;
+          }
+
+          if (filters.statusValue === 'draft' && post.published) {
+            return false;
+          }
+
+          if (!filters.searchValue) {
+            return true;
+          }
+
+          const haystack = [
+            post.title,
+            post.category,
+            post.slug,
+            post.excerpt,
+          ]
+            .join(' ')
+            .toLowerCase();
+
+          return haystack.includes(filters.searchValue);
+        }
+
+        function buildJournalPreviewMarkup(post) {
+          const images = Array.isArray(post.galleryImageUrls) ? post.galleryImageUrls.filter(Boolean) : [];
+          if (images.length === 0) {
+            return '<div class="gallery-piece-preview-empty">No images linked yet.</div>';
+          }
+
+          return images
+            .slice(0, 6)
+            .map(function (url, index) {
+              const safeUrl = escapeHtmlValue(url);
+              const isCover = url === post.coverImageUrl;
+              return '<div class="gallery-piece-preview' + (isCover ? ' is-cover' : '') + '">' +
+                '<img src="' + safeUrl + '" alt="Preview image ' + (index + 1) + '" loading="lazy" />' +
+                '<div class="gallery-piece-preview-actions">' +
+                  '<span class="gallery-piece-preview-label">' + (isCover ? 'Cover frame' : 'Frame ' + (index + 1)) + '</span>' +
+                  '<button type="button" class="ghost-button gallery-piece-preview-button" data-set-journal-cover="' + safeUrl + '">' + (isCover ? 'Selected' : 'Use as cover') + '</button>' +
+                '</div>' +
+              '</div>';
+            })
+            .join('');
+        }
+
+        function readJournalPostsFromDom() {
+          if (!journalEditorEl) return [];
+
+          return Array.from(journalEditorEl.querySelectorAll('[data-journal-card]'))
+            .map(function (card) {
+              const postIndex = Number(card.getAttribute('data-post-index'));
+              const getFieldValue = function (field) {
+                const input = card.querySelector('[data-field="' + field + '"]');
+                return input && typeof input.value === 'string' ? input.value.trim() : '';
+              };
+              const galleryImageUrlsField = card.querySelector('[data-field="galleryImageUrls"]');
+              const featuredField = card.querySelector('[data-field="featured"]');
+              const publishedField = card.querySelector('[data-field="published"]');
+
+              return {
+                postIndex: postIndex,
+                post: normalizeJournalEditorPost({
+                  id: getFieldValue('id'),
+                  slug: getFieldValue('slug'),
+                  title: getFieldValue('title'),
+                  excerpt: getFieldValue('excerpt'),
+                  category: getFieldValue('category'),
+                  publishedAt: getFieldValue('publishedAt'),
+                  featured: Boolean(featuredField && featuredField.checked),
+                  published: Boolean(publishedField && publishedField.checked),
+                  coverImageUrl: getFieldValue('coverImageUrl'),
+                  coverImageAlt: getFieldValue('coverImageAlt'),
+                  galleryImageUrls:
+                    galleryImageUrlsField && typeof galleryImageUrlsField.value === 'string'
+                      ? galleryImageUrlsField.value.split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean)
+                      : [],
+                  body: getFieldValue('body'),
+                }),
+              };
+            })
+            .filter(function (entry) {
+              return Number.isInteger(entry.postIndex) && entry.postIndex >= 0;
+            });
+        }
+
+        function syncVisibleJournalPostsIntoState() {
+          readJournalPostsFromDom().forEach(function (entry) {
+            journalPostsState[entry.postIndex] = entry.post;
+          });
+        }
+
+        function updateJournalPostCount(visibleCount) {
+          if (!journalPostCountEl) {
+            return;
+          }
+
+          const totalCount = journalPostsState.length;
+          journalPostCountEl.textContent =
+            visibleCount === totalCount
+              ? totalCount + ' post' + (totalCount === 1 ? '' : 's')
+              : visibleCount + ' of ' + totalCount + ' posts';
+        }
+
+        function renderJournalEditor() {
+          if (!journalEditorEl) return;
+
+          const filters = getJournalFilterState();
+          const visiblePosts = journalPostsState
+            .map(function (post, postIndex) {
+              return {
+                postIndex: postIndex,
+                post: normalizeJournalEditorPost(post),
+              };
+            })
+            .filter(function (entry) {
+              return journalPostMatchesFilters(entry.post, filters);
+            });
+
+          updateJournalPostCount(visiblePosts.length);
+
+          if (visiblePosts.length === 0) {
+            journalEditorEl.innerHTML = '<div class="empty-editor-state">No journal posts match the current search or status filter.</div>';
+            return;
+          }
+
+          journalEditorEl.innerHTML = visiblePosts
+            .map(function (entry, visibleIndex) {
+              const normalized = normalizeJournalEditorPost(entry.post);
+              const summaryTitle = normalized.title || 'Untitled article';
+              const summaryMeta =
+                normalized.category + ' / ' + normalized.publishedAt + (normalized.published ? ' / published' : ' / draft');
+              const previewMarkup = buildJournalPreviewMarkup(normalized);
+              const previewCardMarkup = buildJournalPreviewCardMarkup(normalized);
+
+              return '<details class="gallery-piece-card" data-journal-card data-post-index="' + entry.postIndex + '" ' + (visibleIndex < 1 ? 'open' : '') + '>' +
+                '<summary>' +
+                  '<div>' +
+                    '<strong>' + escapeHtmlValue(summaryTitle) + '</strong>' +
+                    '<div class="gallery-piece-meta">' + escapeHtmlValue(summaryMeta) + (normalized.featured ? ' / featured' : '') + '</div>' +
+                  '</div>' +
+                  '<div class="journal-summary-actions">' +
+                    '<button type="button" class="ghost-button" data-move-journal-post="' + entry.postIndex + '" data-direction="-1">Up</button>' +
+                    '<button type="button" class="ghost-button" data-move-journal-post="' + entry.postIndex + '" data-direction="1">Down</button>' +
+                    '<button type="button" class="ghost-button" data-duplicate-journal-post="' + entry.postIndex + '">Duplicate</button>' +
+                    '<button type="button" class="danger-button" data-remove-journal-post="' + entry.postIndex + '">Remove</button>' +
+                  '</div>' +
+                '</summary>' +
+                '<div class="gallery-piece-body">' +
+                  '<div class="piece-grid">' +
+                    '<input type="hidden" data-field="id" value="' + escapeHtmlValue(normalized.id) + '" />' +
+                    '<p><label>Title<br /><input data-field="title" value="' + escapeHtmlValue(normalized.title) + '" /></label></p>' +
+                    '<p><label>Slug<br /><input data-field="slug" value="' + escapeHtmlValue(normalized.slug) + '" /></label></p>' +
+                    '<p><label>Category<br /><input data-field="category" value="' + escapeHtmlValue(normalized.category) + '" /></label></p>' +
+                    '<p><label>Publish Date<br /><input type="date" data-field="publishedAt" value="' + escapeHtmlValue(normalized.publishedAt) + '" /></label></p>' +
+                    '<div class="full">' + previewCardMarkup + '</div>' +
+                    '<p class="full"><label>Excerpt<br /><textarea data-field="excerpt" style="min-height:110px;">' + escapeHtmlValue(normalized.excerpt) + '</textarea></label></p>' +
+                    '<div class="journal-field-stack"><label>Cover Image URL<br /><input data-field="coverImageUrl" data-upload-mode="replace" value="' + escapeHtmlValue(normalized.coverImageUrl) + '" /></label><div class="journal-upload-row"><input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" data-journal-upload-file="cover" /><button type="button" class="ghost-button" data-upload-journal-field="cover">Upload Cover</button><button type="button" class="ghost-button" data-focus-upload-field="coverImageUrl">Use Library</button></div></div>' +
+                    '<p><label>Cover Image Alt<br /><input data-field="coverImageAlt" value="' + escapeHtmlValue(normalized.coverImageAlt) + '" /></label></p>' +
+                    '<div class="full"><label>Image Selection</label><p class="upload-help" style="margin:0 0 0.75rem 0;">Choose the frame that leads the article, cards, and journal preview.</p><div class="gallery-piece-preview-strip">' + previewMarkup + '</div></div>' +
+                    '<div class="full journal-field-stack"><label>Gallery Images (one per line)<br /><textarea data-field="galleryImageUrls" data-upload-mode="append" style="min-height:140px;">' + escapeHtmlValue(normalized.galleryImageUrls.join('\\n')) + '</textarea></label><div class="journal-upload-row"><input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" data-journal-upload-file="gallery" multiple /><button type="button" class="ghost-button" data-upload-journal-field="gallery">Upload To Gallery</button><button type="button" class="ghost-button" data-focus-upload-field="galleryImageUrls">Use Library</button></div></div>' +
+                    '<div class="full"><label>Body</label><div class="body-tools"><button type="button" class="ghost-button" data-insert-body-snippet="heading">Heading</button><button type="button" class="ghost-button" data-insert-body-snippet="quote">Quote</button><button type="button" class="ghost-button" data-insert-body-snippet="list">List</button><button type="button" class="ghost-button" data-insert-body-snippet="break">Paragraph Break</button></div><textarea data-field="body" style="min-height:240px;">' + escapeHtmlValue(normalized.body) + '</textarea></div>' +
+                    '<p><label class="checkbox-row"><input type="checkbox" data-field="published" ' + (normalized.published ? 'checked' : '') + ' /> Published on public site</label></p>' +
+                    '<p><label class="checkbox-row"><input type="checkbox" data-field="featured" ' + (normalized.featured ? 'checked' : '') + ' /> Feature in homepage journal preview</label></p>' +
+                  '</div>' +
+                '</div>' +
+              '</details>';
+            })
+            .join('');
+
+          lastFocusedUploadField = null;
         }
 
         function setStatus(message, isError) {
@@ -1330,6 +1913,54 @@ app.get('/admin', async (req, res, next) => {
           });
         }
 
+        function triggerFieldChange(field) {
+          field.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        function insertUploadUrlIntoField(field, url, mode) {
+          if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) {
+            return;
+          }
+
+          const uploadMode = mode || field.getAttribute('data-upload-mode') || 'append';
+          const currentValue = String(field.value || '').trim();
+          field.value = uploadMode === 'replace'
+            ? url
+            : currentValue ? currentValue + '\\n' + url : url;
+          triggerFieldChange(field);
+          field.focus();
+        }
+
+        async function uploadSingleImage(file) {
+          const base64Data = await fileToBase64(file);
+          const response = await fetch('/api/uploads', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fileName: file.name,
+              mimeType: file.type,
+              base64Data: base64Data,
+            }),
+          });
+
+          const payload = await response.json();
+          if (!response.ok || !payload || typeof payload.url !== 'string') {
+            throw new Error(payload && payload.message ? payload.message : 'Upload failed.');
+          }
+
+          return payload.url;
+        }
+
+        async function uploadMultipleImages(files) {
+          const uploadedUrls = [];
+
+          for (const file of files) {
+            uploadedUrls.push(await uploadSingleImage(file));
+          }
+
+          return uploadedUrls;
+        }
+
         document.querySelectorAll('.image-upload-button').forEach(function (button) {
           button.addEventListener('click', async function () {
             const targetField = button.getAttribute('data-target-field');
@@ -1346,24 +1977,8 @@ app.get('/admin', async (req, res, next) => {
 
             try {
               setStatus('Uploading image...', false);
-              const base64Data = await fileToBase64(selectedFile);
-
-              const response = await fetch('/api/uploads', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  fileName: selectedFile.name,
-                  mimeType: selectedFile.type,
-                  base64Data: base64Data,
-                }),
-              });
-
-              const payload = await response.json();
-              if (!response.ok || !payload || typeof payload.url !== 'string') {
-                throw new Error(payload && payload.message ? payload.message : 'Upload failed.');
-              }
-
-              targetInput.value = payload.url;
+              const uploadedUrl = await uploadSingleImage(selectedFile);
+              targetInput.value = uploadedUrl;
               setStatus('Image uploaded. URL inserted into field.', false);
               refreshUploads();
             } catch (error) {
@@ -1424,7 +2039,7 @@ app.get('/admin', async (req, res, next) => {
               target instanceof HTMLTextAreaElement &&
               target.getAttribute('data-field') === 'imageUrls'
             ) {
-              lastFocusedImageUrlsField = target;
+              lastFocusedUploadField = target;
             }
           });
 
@@ -1515,6 +2130,403 @@ app.get('/admin', async (req, res, next) => {
           });
         }
 
+        if (journalEditorEl && journalForm && journalPostsJsonField) {
+          renderJournalEditor();
+
+          journalEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const removeButton = event.target.closest('[data-remove-journal-post]');
+            if (!removeButton) return;
+
+            event.preventDefault();
+            syncVisibleJournalPostsIntoState();
+            const index = Number(removeButton.getAttribute('data-remove-journal-post'));
+            journalPostsState = journalPostsState.filter(function (_post, postIndex) {
+              return postIndex !== index;
+            });
+            renderJournalEditor();
+          });
+
+          journalEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const duplicateButton = event.target.closest('[data-duplicate-journal-post]');
+            if (!duplicateButton) {
+              return;
+            }
+
+            event.preventDefault();
+            syncVisibleJournalPostsIntoState();
+            const index = Number(duplicateButton.getAttribute('data-duplicate-journal-post'));
+            const current = journalPostsState[index];
+            if (!current) {
+              return;
+            }
+
+            const duplicated = normalizeJournalEditorPost({
+              ...current,
+              id: '',
+              slug: current.slug ? current.slug + '-copy' : '',
+              title: current.title ? current.title + ' Copy' : '',
+              published: false,
+              featured: false,
+            });
+            journalPostsState.splice(index + 1, 0, duplicated);
+            renderJournalEditor();
+            setStatus('Journal post duplicated as a draft.', false);
+          });
+
+          journalEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const moveButton = event.target.closest('[data-move-journal-post]');
+            if (!moveButton) {
+              return;
+            }
+
+            event.preventDefault();
+            syncVisibleJournalPostsIntoState();
+            const index = Number(moveButton.getAttribute('data-move-journal-post'));
+            const direction = Number(moveButton.getAttribute('data-direction'));
+            const nextIndex = index + direction;
+
+            if (index < 0 || nextIndex < 0 || nextIndex >= journalPostsState.length) {
+              return;
+            }
+
+            const nextState = journalPostsState.slice();
+            const currentPost = nextState[index];
+            nextState[index] = nextState[nextIndex];
+            nextState[nextIndex] = currentPost;
+            journalPostsState = nextState;
+            renderJournalEditor();
+          });
+
+          journalEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const coverButton = event.target.closest('[data-set-journal-cover]');
+            if (!coverButton) {
+              return;
+            }
+
+            event.preventDefault();
+            const card = coverButton.closest('[data-journal-card]');
+            const coverImageUrlField = card && card.querySelector('[data-field="coverImageUrl"]');
+            const nextCoverUrl = coverButton.getAttribute('data-set-journal-cover') || '';
+
+            if (!(coverImageUrlField instanceof HTMLInputElement) || !nextCoverUrl) {
+              return;
+            }
+
+            coverImageUrlField.value = nextCoverUrl;
+            syncVisibleJournalPostsIntoState();
+            renderJournalEditor();
+            setStatus('Cover image updated for this journal post.', false);
+          });
+
+          journalEditorEl.addEventListener('click', async function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const uploadButton = event.target.closest('[data-upload-journal-field]');
+            if (!uploadButton) {
+              return;
+            }
+
+            event.preventDefault();
+            const uploadTarget = uploadButton.getAttribute('data-upload-journal-field');
+            const card = uploadButton.closest('[data-journal-card]');
+            const fileInput = card && card.querySelector('[data-journal-upload-file="' + uploadTarget + '"]');
+            const coverField = card && card.querySelector('[data-field="coverImageUrl"]');
+            const galleryField = card && card.querySelector('[data-field="galleryImageUrls"]');
+            const selectedFiles =
+              fileInput instanceof HTMLInputElement && fileInput.files
+                ? Array.from(fileInput.files)
+                : [];
+
+            if (selectedFiles.length === 0) {
+              setStatus('Select one or more images first.', true);
+              return;
+            }
+
+            try {
+              setStatus('Uploading image' + (selectedFiles.length > 1 ? 's' : '') + '...', false);
+              const uploadedUrls = await uploadMultipleImages(selectedFiles);
+
+              if (uploadTarget === 'cover' && coverField instanceof HTMLInputElement) {
+                insertUploadUrlIntoField(coverField, uploadedUrls[0], 'replace');
+                if (galleryField instanceof HTMLTextAreaElement) {
+                  uploadedUrls.forEach(function (url) {
+                    insertUploadUrlIntoField(galleryField, url, 'append');
+                  });
+                }
+              } else if (uploadTarget === 'gallery' && galleryField instanceof HTMLTextAreaElement) {
+                uploadedUrls.forEach(function (url) {
+                  insertUploadUrlIntoField(galleryField, url, 'append');
+                });
+              }
+
+              renderJournalEditor();
+              refreshUploads();
+              setStatus('Uploaded ' + uploadedUrls.length + ' image' + (uploadedUrls.length === 1 ? '' : 's') + ' into the journal post.', false);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Upload failed.';
+              setStatus(message, true);
+            }
+          });
+
+          journalEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const focusButton = event.target.closest('[data-focus-upload-field]');
+            if (!focusButton) {
+              return;
+            }
+
+            event.preventDefault();
+            const card = focusButton.closest('[data-journal-card]');
+            const fieldName = focusButton.getAttribute('data-focus-upload-field');
+            const field = card && card.querySelector('[data-field="' + fieldName + '"]');
+            if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) {
+              return;
+            }
+
+            lastFocusedUploadField = field;
+            field.focus();
+            setStatus('Field selected. Choose an image from the archive below and press Insert.', false);
+          });
+
+          journalEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const snippetButton = event.target.closest('[data-insert-body-snippet]');
+            if (!snippetButton) {
+              return;
+            }
+
+            event.preventDefault();
+            const snippetType = snippetButton.getAttribute('data-insert-body-snippet');
+            const card = snippetButton.closest('[data-journal-card]');
+            const bodyField = card && card.querySelector('[data-field="body"]');
+            if (!(bodyField instanceof HTMLTextAreaElement)) {
+              return;
+            }
+
+            const snippets = {
+              heading: '## New Section',
+              quote: '> Add a memorable line here.',
+              list: '- First point\\n- Second point',
+              break: '',
+            };
+            const snippet = snippets[snippetType] ?? '';
+            const existing = String(bodyField.value || '');
+            bodyField.value = existing
+              ? existing.replace(/\s*$/, '') + '\\n\\n' + snippet
+              : snippet;
+            triggerFieldChange(bodyField);
+            bodyField.focus();
+          });
+
+          journalEditorEl.addEventListener('focusin', function (event) {
+            const target = event.target;
+            if (
+              (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) &&
+              typeof target.getAttribute('data-upload-mode') === 'string'
+            ) {
+              lastFocusedUploadField = target;
+            }
+          });
+
+          journalEditorEl.addEventListener('change', function (event) {
+            const target = event.target;
+            if (
+              target instanceof HTMLInputElement &&
+              target.getAttribute('data-field') === 'title'
+            ) {
+              const card = target.closest('[data-journal-card]');
+              const slugField = card && card.querySelector('[data-field="slug"]');
+              const currentSlug = slugField instanceof HTMLInputElement ? slugField.value.trim() : '';
+              const titleSlug = slugifyPieceId(target.value || '');
+
+              if (slugField instanceof HTMLInputElement && !currentSlug) {
+                slugField.value = titleSlug;
+              }
+            }
+
+            if (
+              target instanceof HTMLTextAreaElement &&
+              target.getAttribute('data-field') === 'galleryImageUrls'
+            ) {
+              syncVisibleJournalPostsIntoState();
+              renderJournalEditor();
+              return;
+            }
+
+            if (
+              target instanceof HTMLInputElement &&
+              (target.getAttribute('data-field') === 'coverImageUrl' ||
+                target.getAttribute('data-field') === 'featured' ||
+                target.getAttribute('data-field') === 'published')
+            ) {
+              syncVisibleJournalPostsIntoState();
+              renderJournalEditor();
+            }
+          });
+
+          if (journalAddPostButton) {
+            journalAddPostButton.addEventListener('click', function () {
+              syncVisibleJournalPostsIntoState();
+              journalPostsState.push(normalizeJournalEditorPost({
+                id: '',
+                slug: '',
+                title: '',
+                excerpt: '',
+                category: '',
+                publishedAt: new Date().toISOString().slice(0, 10),
+                featured: false,
+                published: false,
+                coverImageUrl: '',
+                coverImageAlt: '',
+                galleryImageUrls: [],
+                body: '',
+              }));
+              renderJournalEditor();
+            });
+          }
+
+          if (journalPostSearchInput) {
+            journalPostSearchInput.addEventListener('input', function () {
+              syncVisibleJournalPostsIntoState();
+              renderJournalEditor();
+            });
+          }
+
+          if (journalPostStatusFilter) {
+            journalPostStatusFilter.addEventListener('change', function () {
+              syncVisibleJournalPostsIntoState();
+              renderJournalEditor();
+            });
+          }
+
+          if (journalExpandAllButton) {
+            journalExpandAllButton.addEventListener('click', function () {
+              Array.from(journalEditorEl.querySelectorAll('[data-journal-card]')).forEach(function (card) {
+                card.setAttribute('open', 'open');
+              });
+            });
+          }
+
+          if (journalCollapseAllButton) {
+            journalCollapseAllButton.addEventListener('click', function () {
+              Array.from(journalEditorEl.querySelectorAll('[data-journal-card]')).forEach(function (card) {
+                card.removeAttribute('open');
+              });
+            });
+          }
+
+          journalForm.addEventListener('submit', function () {
+            syncVisibleJournalPostsIntoState();
+            journalPostsJsonField.value = JSON.stringify(journalPostsState.filter(isMeaningfulJournalPost));
+          });
+        }
+
+        if (journalDeviceUploadInput instanceof HTMLInputElement) {
+          const handleJournalDeviceUpload = async function (mode) {
+            const files = journalDeviceUploadInput.files ? Array.from(journalDeviceUploadInput.files) : [];
+            if (files.length === 0) {
+              setStatus('Select one or more images from this device first.', true);
+              return;
+            }
+
+            const activeCard = lastFocusedUploadField ? lastFocusedUploadField.closest('[data-journal-card]') : null;
+            const coverField = activeCard && activeCard.querySelector('[data-field="coverImageUrl"]');
+            const galleryField = activeCard && activeCard.querySelector('[data-field="galleryImageUrls"]');
+
+            if (mode !== 'selected' && !activeCard) {
+              setStatus('Select a journal post field first so the upload knows where to place the image.', true);
+              return;
+            }
+
+            if (mode === 'selected' && !lastFocusedUploadField) {
+              setStatus('Select a journal cover or gallery field first, then upload.', true);
+              return;
+            }
+
+            try {
+              setStatus('Uploading image' + (files.length > 1 ? 's' : '') + '...', false);
+              const uploadedUrls = await uploadMultipleImages(files);
+
+              if (mode === 'cover') {
+                if (!(coverField instanceof HTMLInputElement)) {
+                  setStatus('Could not find the journal cover field.', true);
+                  return;
+                }
+
+                insertUploadUrlIntoField(coverField, uploadedUrls[0], 'replace');
+                if (galleryField instanceof HTMLTextAreaElement) {
+                  uploadedUrls.forEach(function (url) {
+                    insertUploadUrlIntoField(galleryField, url, 'append');
+                  });
+                }
+              } else if (mode === 'gallery') {
+                if (!(galleryField instanceof HTMLTextAreaElement)) {
+                  setStatus('Could not find the journal gallery field.', true);
+                  return;
+                }
+
+                uploadedUrls.forEach(function (url) {
+                  insertUploadUrlIntoField(galleryField, url, 'append');
+                });
+              } else {
+                uploadedUrls.forEach(function (url) {
+                  insertUploadUrlIntoField(lastFocusedUploadField, url);
+                });
+              }
+
+              journalDeviceUploadInput.value = '';
+              renderJournalEditor();
+              refreshUploads();
+              setStatus('Uploaded ' + uploadedUrls.length + ' image' + (uploadedUrls.length === 1 ? '' : 's') + ' from this device.', false);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Upload failed.';
+              setStatus(message, true);
+            }
+          };
+
+          if (journalUploadToSelectedButton) {
+            journalUploadToSelectedButton.addEventListener('click', function () {
+              handleJournalDeviceUpload('selected');
+            });
+          }
+
+          if (journalUploadToCoverButton) {
+            journalUploadToCoverButton.addEventListener('click', function () {
+              handleJournalDeviceUpload('cover');
+            });
+          }
+
+          if (journalUploadToGalleryButton) {
+            journalUploadToGalleryButton.addEventListener('click', function () {
+              handleJournalDeviceUpload('gallery');
+            });
+          }
+        }
+
         if (uploadsSearchInput) {
           uploadsSearchInput.addEventListener('input', renderUploads);
         }
@@ -1548,16 +2560,19 @@ app.get('/admin', async (req, res, next) => {
             if (insertButton) {
               const url = insertButton.getAttribute('data-insert-upload') || '';
 
-              if (!lastFocusedImageUrlsField || !document.contains(lastFocusedImageUrlsField)) {
-                setStatus('Select an Image URLs field first, then use Insert.', true);
+              if (!lastFocusedUploadField || !document.contains(lastFocusedUploadField)) {
+                setStatus('Select an image field first, then use Insert.', true);
                 return;
               }
 
-              const currentValue = String(lastFocusedImageUrlsField.value || '').trim();
-              lastFocusedImageUrlsField.value = currentValue ? currentValue + '\\n' + url : url;
-              lastFocusedImageUrlsField.dispatchEvent(new Event('change', { bubbles: true }));
-              lastFocusedImageUrlsField.focus();
-              setStatus('Image URL inserted into the selected piece.', false);
+              const uploadMode = lastFocusedUploadField.getAttribute('data-upload-mode') || 'append';
+              const currentValue = String(lastFocusedUploadField.value || '').trim();
+              lastFocusedUploadField.value = uploadMode === 'replace'
+                ? url
+                : currentValue ? currentValue + '\\n' + url : url;
+              lastFocusedUploadField.dispatchEvent(new Event('change', { bubbles: true }));
+              lastFocusedUploadField.focus();
+              setStatus('Image URL inserted into the selected field.', false);
             }
           });
         }
@@ -1837,6 +2852,45 @@ app.post('/admin/content/gallery', async (req, res, next) => {
   }
 });
 
+app.post('/admin/content/journal', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const posts = parseJournalPostsJson(req.body);
+
+    if (posts.length === 0) {
+      res.redirect(303, '/admin?tab=journal&status=invalid');
+      return;
+    }
+
+    const content: JournalContent = normalizeJournalContent({
+      previewEyebrow: parseRequiredStringField(req.body, 'journalPreviewEyebrow', 120),
+      previewHeading: parseRequiredStringField(req.body, 'journalPreviewHeading', 200),
+      previewDescription: parseRequiredStringField(req.body, 'journalPreviewDescription', 3000),
+      pageEyebrow: parseRequiredStringField(req.body, 'journalPageEyebrow', 120),
+      pageHeading: parseRequiredStringField(req.body, 'journalPageHeading', 220),
+      pageDescription: parseRequiredStringField(req.body, 'journalPageDescription', 4000),
+      posts,
+    });
+
+    await upsertJournalContent(content);
+    invalidatePageCache();
+    res.redirect(303, '/admin?tab=journal&status=saved');
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Invalid')) {
+      res.redirect(303, '/admin?tab=journal&status=invalid');
+      return;
+    }
+
+    next(error);
+  }
+});
+
 app.post('/admin/content/contact', async (req, res, next) => {
   try {
     const user = await getAuthenticatedUser(req);
@@ -1934,6 +2988,7 @@ app.post('/admin/content/reset', async (req, res, next) => {
       upsertHeroContent(defaultHeroContent),
       upsertAboutContent(defaultAboutContent),
       upsertGalleryContent(defaultGalleryContent),
+      upsertJournalContent(defaultJournalContent),
       upsertContactContent(defaultContactContent),
       upsertCraftsmanshipContent(defaultCraftsmanshipContent),
     ]);
@@ -2073,6 +3128,18 @@ app.get('/api/gallery', async (_req, res, next) => {
   }
 });
 
+app.get('/api/journal', async (_req, res, next) => {
+  try {
+    const journal = await getJournalContent();
+    res.json({
+      ...journal,
+      posts: journal.posts.filter((post) => post.published !== false),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/contact', async (_req, res, next) => {
   try {
     const contact = await getContactContent();
@@ -2176,6 +3243,22 @@ app.put('/api/gallery', async (req, res, next) => {
     }
 
     const saved = await upsertGalleryContent(req.body);
+    invalidatePageCache();
+    res.json(saved);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/journal', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const saved = await upsertJournalContent(req.body);
     invalidatePageCache();
     res.json(saved);
   } catch (error) {
@@ -2295,16 +3378,29 @@ app.get('*', async (req, res, next) => {
     const heroContent = await getHeroContent();
     const aboutContent = await getAboutContent();
     const galleryContent = await getGalleryContent();
+    const journalContent = await getJournalContent();
     const contactContent = await getContactContent();
     const craftsmanshipContent = await getCraftsmanshipContent();
-    const appHtml = render(heroContent, aboutContent, galleryContent, contactContent, craftsmanshipContent, req.path);
+    const appHtml = render(
+      heroContent,
+      aboutContent,
+      galleryContent,
+      journalContent,
+      contactContent,
+      craftsmanshipContent,
+      req.path
+    );
 
-    const initialDataScript = `<script>window.__INITIAL_HERO__=${serializeForScript(heroContent)};window.__INITIAL_ABOUT__=${serializeForScript(aboutContent)};window.__INITIAL_GALLERY__=${serializeForScript(galleryContent)};window.__INITIAL_CONTACT__=${serializeForScript(contactContent)};window.__INITIAL_CRAFTSMANSHIP__=${serializeForScript(craftsmanshipContent)}</script>`;
+    if (req.path.startsWith('/journal/') && !getJournalPostBySlug(journalContent, req.path.slice('/journal/'.length))) {
+      res.status(404);
+    }
+
+    const initialDataScript = `<script>window.__INITIAL_HERO__=${serializeForScript(heroContent)};window.__INITIAL_ABOUT__=${serializeForScript(aboutContent)};window.__INITIAL_GALLERY__=${serializeForScript(galleryContent)};window.__INITIAL_JOURNAL__=${serializeForScript(journalContent)};window.__INITIAL_CONTACT__=${serializeForScript(contactContent)};window.__INITIAL_CRAFTSMANSHIP__=${serializeForScript(craftsmanshipContent)}</script>`;
     const html = template.replace('<div id="root"></div>', `<div id="root">${appHtml}</div>${initialDataScript}`);
 
     cachedHtmlByPath.set(cacheKey, html);
 
-    res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+    res.set({ 'Content-Type': 'text/html' }).end(html);
   } catch (error) {
     if (vite) {
       vite.ssrFixStacktrace(error as Error);

@@ -22,17 +22,18 @@ function shouldHandleClientNavigation(event: MouseEvent<HTMLAnchorElement>, href
 
 export function Footer({ currentPath = '/', onNavigate }: FooterProps) {
   const year = new Date().getFullYear();
-  const isGalleryPage = currentPath === '/gallery';
+  const isDetachedPage = currentPath !== '/';
+  const isJournalPage = currentPath === '/journal' || currentPath.startsWith('/journal/');
   const navigationItems = [
     { href: '/gallery', label: 'Gallery' },
-    { href: isGalleryPage ? '/#about' : '#about', label: 'About' },
-    { href: isGalleryPage ? '/#journal' : '#journal', label: 'Journal' },
-    { href: isGalleryPage ? '/#contact' : '#contact', label: 'Contact' },
+    { href: isDetachedPage ? '/#about' : '#about', label: 'About' },
+    { href: isJournalPage ? '/journal' : isDetachedPage ? '/#journal' : '#journal', label: 'Journal' },
+    { href: isDetachedPage ? '/#contact' : '#contact', label: 'Contact' },
   ];
   const connectItems = [
     { href: 'mailto:info@artofnatureeg.com', label: 'Email the studio' },
     { href: 'tel:+201030422422', label: 'Call +20 103 042 2422' },
-    { href: isGalleryPage ? '/gallery' : '#top', label: 'Back to top' },
+    { href: isDetachedPage ? '/' : '#top', label: 'Back to top' },
   ];
 
   const handleNavigationClick = (event: MouseEvent<HTMLAnchorElement>, href: string) => {

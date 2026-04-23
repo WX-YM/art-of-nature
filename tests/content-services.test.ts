@@ -3,18 +3,21 @@ import assert from 'node:assert/strict';
 import { getHeroContent, upsertHeroContent } from '../server/hero-content-service';
 import { getAboutContent, upsertAboutContent } from '../server/about-content-service';
 import { getGalleryContent, upsertGalleryContent } from '../server/gallery-content-service';
+import { getJournalContent, upsertJournalContent } from '../server/journal-content-service';
 import { getContactContent, upsertContactContent } from '../server/contact-content-service';
 import { getCraftsmanshipContent, upsertCraftsmanshipContent } from '../server/craftsmanship-content-service';
 import { createContactMessage } from '../server/contact-message-service';
 import { HeroContentModel } from '../server/models/HeroContent';
 import { AboutContentModel } from '../server/models/AboutContent';
 import { GalleryContentModel } from '../server/models/GalleryContent';
+import { JournalContentModel } from '../server/models/JournalContent';
 import { ContactContentModel } from '../server/models/ContactContent';
 import { CraftsmanshipContentModel } from '../server/models/CraftsmanshipContent';
 import { ContactMessageModel } from '../server/models/ContactMessage';
 import { defaultHeroContent } from '../src/app/lib/heroContent';
 import { defaultAboutContent } from '../src/app/lib/aboutContent';
 import { defaultGalleryContent } from '../src/app/lib/gallery';
+import { defaultJournalContent } from '../src/app/lib/journal';
 import { defaultContactContent } from '../src/app/lib/contactContent';
 import { defaultCraftsmanshipContent } from '../src/app/lib/craftsmanshipContent';
 
@@ -198,6 +201,51 @@ test('upsertGalleryContent persists with fixed key and returns normalized input'
     assert.equal(saved.pieces.length, 2);
   } finally {
     (GalleryContentModel as unknown as { findOneAndUpdate: typeof GalleryContentModel.findOneAndUpdate }).findOneAndUpdate =
+      originalFindOneAndUpdate;
+  }
+});
+
+test('getJournalContent returns defaults when no document exists', async () => {
+  const originalFindOne = JournalContentModel.findOne;
+
+  (JournalContentModel as unknown as { findOne: () => { lean: () => Promise<unknown> } }).findOne = () => ({
+    lean: async () => null,
+  });
+
+  try {
+    const content = await getJournalContent();
+    assert.deepEqual(content, defaultJournalContent);
+  } finally {
+    (JournalContentModel as unknown as { findOne: typeof JournalContentModel.findOne }).findOne = originalFindOne;
+  }
+});
+
+test('upsertJournalContent persists with fixed key and returns normalized input', async () => {
+  const originalFindOneAndUpdate = JournalContentModel.findOneAndUpdate;
+
+  (JournalContentModel as unknown as { findOneAndUpdate: (...args: unknown[]) => Promise<unknown> }).findOneAndUpdate = (
+    filter: unknown,
+    update: unknown,
+    options: unknown
+  ) => {
+    assert.deepEqual(filter, { key: 'primary-journal' });
+    assert.deepEqual(options, { upsert: true, new: true, setDefaultsOnInsert: true });
+    assert.equal((update as { key: string }).key, 'primary-journal');
+    return Promise.resolve(null);
+  };
+
+  const input = {
+    ...defaultJournalContent,
+    previewHeading: 'Edited Journal Heading',
+    posts: defaultJournalContent.posts.slice(0, 2),
+  };
+
+  try {
+    const saved = await upsertJournalContent(input);
+    assert.equal(saved.previewHeading, 'Edited Journal Heading');
+    assert.equal(saved.posts.length, 2);
+  } finally {
+    (JournalContentModel as unknown as { findOneAndUpdate: typeof JournalContentModel.findOneAndUpdate }).findOneAndUpdate =
       originalFindOneAndUpdate;
   }
 });

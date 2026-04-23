@@ -25,14 +25,15 @@ function shouldHandleClientNavigation(event: MouseEvent<HTMLAnchorElement>, href
 export function Navigation({ currentPath = '/', onNavigate }: NavigationProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
-  const isGalleryPage = currentPath === '/gallery';
+  const isDetachedPage = currentPath !== '/';
+  const isJournalPage = currentPath === '/journal' || currentPath.startsWith('/journal/');
   const navigationItems = [
     { href: '/gallery', label: 'Gallery' },
-    { href: isGalleryPage ? '/#about' : '#about', label: 'About' },
-    { href: isGalleryPage ? '/#journal' : '#journal', label: 'Journal' },
+    { href: isDetachedPage ? '/#about' : '#about', label: 'About' },
+    { href: isJournalPage ? '/journal' : isDetachedPage ? '/#journal' : '#journal', label: 'Journal' },
   ];
-  const homeHref = isGalleryPage ? '/' : '#top';
-  const contactHref = isGalleryPage ? '/#contact' : '#contact';
+  const homeHref = isDetachedPage ? '/' : '#top';
+  const contactHref = isDetachedPage ? '/#contact' : '#contact';
 
   useEffect(() => {
     const handleScroll = () => {

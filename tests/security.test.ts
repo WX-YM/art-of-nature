@@ -39,6 +39,7 @@ describe('Admin Security Protections', () => {
     { method: 'GET', url: '/admin' },
     { method: 'POST', url: '/admin/content/hero' },
     { method: 'POST', url: '/admin/content/about' },
+    { method: 'POST', url: '/admin/content/journal' },
     { method: 'POST', url: '/admin/content/contact' },
     { method: 'POST', url: '/admin/content/craftsmanship' },
     { method: 'POST', url: '/admin/content/reset' },
@@ -46,6 +47,7 @@ describe('Admin Security Protections', () => {
     { method: 'POST', url: '/api/uploads' },
     { method: 'GET', url: '/api/visits' },
     { method: 'PUT', url: '/api/about' },
+    { method: 'PUT', url: '/api/journal' },
     { method: 'PUT', url: '/api/hero' },
     { method: 'PUT', url: '/api/contact' },
     { method: 'PUT', url: '/api/craftsmanship' },
@@ -90,6 +92,11 @@ describe('Admin Security Protections', () => {
 
   test('Public GET /api/contact remains accessible', async () => {
     const response = await fetch(`${baseUrl}/api/contact`);
+    assert.equal(response.status, 200);
+  });
+
+  test('Public GET /api/journal remains accessible', async () => {
+    const response = await fetch(`${baseUrl}/api/journal`);
     assert.equal(response.status, 200);
   });
 

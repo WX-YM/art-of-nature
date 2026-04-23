@@ -5,7 +5,9 @@ import { About } from './components/About';
 import { GalleryPreview } from './components/GalleryPreview';
 import { GalleryPage } from './components/GalleryPage';
 import { Craftsmanship } from './components/Craftsmanship';
-import { BlogPreview } from './components/BlogPreview';
+import { JournalPreview } from './components/JournalPreview';
+import { JournalPage } from './components/JournalPage';
+import { JournalArticlePage } from './components/JournalArticlePage';
 import { Contact } from './components/Contact';
 import { Footer } from './components/Footer';
 import type { GalleryContent } from './lib/gallery';
@@ -13,11 +15,13 @@ import type { HeroContent } from './lib/heroContent';
 import type { AboutContent } from './lib/aboutContent';
 import type { ContactContent } from './lib/contactContent';
 import type { CraftsmanshipContent } from './lib/craftsmanshipContent';
+import type { JournalContent } from './lib/journal';
 
 type AppProps = {
   heroContent: HeroContent;
   aboutContent: AboutContent;
   galleryContent: GalleryContent;
+  journalContent: JournalContent;
   contactContent: ContactContent;
   craftsmanshipContent: CraftsmanshipContent;
   routePath?: string;
@@ -61,17 +65,41 @@ function scrollToHash(hash: string) {
   }
 }
 
+type RouteMatch =
+  | { kind: 'home' }
+  | { kind: 'gallery' }
+  | { kind: 'journal-index' }
+  | { kind: 'journal-article'; slug: string };
+
+function matchRoute(pathname: string): RouteMatch {
+  if (pathname === '/gallery') {
+    return { kind: 'gallery' };
+  }
+
+  if (pathname === '/journal') {
+    return { kind: 'journal-index' };
+  }
+
+  if (pathname.startsWith('/journal/')) {
+    const slug = pathname.slice('/journal/'.length).trim();
+    return { kind: 'journal-article', slug };
+  }
+
+  return { kind: 'home' };
+}
+
 export default function App({
   heroContent,
   aboutContent,
   galleryContent,
+  journalContent,
   contactContent,
   craftsmanshipContent,
   routePath = '/',
 }: AppProps) {
   const normalizedPath = normalizePath(routePath);
   const [clientLocation, setClientLocation] = useState<ClientLocation>(() => readClientLocation(normalizedPath));
-  const isGalleryPage = clientLocation.path === '/gallery';
+  const routeMatch = matchRoute(clientLocation.path);
 
   useEffect(() => {
     const syncLocation = () => {
@@ -165,15 +193,19 @@ export default function App({
         <div className="absolute right-[-10rem] top-[58rem] h-96 w-96 rounded-full bg-accent/10 blur-3xl" />
       </div>
       <Navigation currentPath={clientLocation.path} onNavigate={handleNavigate} />
-      {isGalleryPage ? (
+      {routeMatch.kind === 'gallery' ? (
         <GalleryPage content={galleryContent} />
+      ) : routeMatch.kind === 'journal-index' ? (
+        <JournalPage content={journalContent} />
+      ) : routeMatch.kind === 'journal-article' ? (
+        <JournalArticlePage content={journalContent} slug={routeMatch.slug} />
       ) : (
         <>
           <Hero content={heroContent} />
           <About content={aboutContent} />
           <GalleryPreview content={galleryContent} />
           <Craftsmanship content={craftsmanshipContent} />
-          <BlogPreview />
+          <JournalPreview content={journalContent} />
         </>
       )}
       <Contact content={contactContent} />

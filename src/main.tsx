@@ -5,6 +5,7 @@ import { defaultHeroContent, type HeroContent } from './app/lib/heroContent';
 import { defaultAboutContent, type AboutContent } from './app/lib/aboutContent';
 import { defaultContactContent, type ContactContent } from './app/lib/contactContent';
 import { defaultCraftsmanshipContent, type CraftsmanshipContent } from './app/lib/craftsmanshipContent';
+import { defaultJournalContent, type JournalContent } from './app/lib/journal';
 import { markVisitTracked, shouldTrackVisit } from './app/lib/siteVisitTracking';
 
 declare global {
@@ -12,6 +13,7 @@ declare global {
     __INITIAL_HERO__?: HeroContent;
     __INITIAL_ABOUT__?: AboutContent;
     __INITIAL_GALLERY__?: GalleryContent;
+    __INITIAL_JOURNAL__?: JournalContent;
     __INITIAL_CONTACT__?: ContactContent;
     __INITIAL_CRAFTSMANSHIP__?: CraftsmanshipContent;
   }
@@ -26,6 +28,7 @@ if (!rootElement) {
 const heroContent = window.__INITIAL_HERO__ ?? defaultHeroContent;
 const aboutContent = window.__INITIAL_ABOUT__ ?? defaultAboutContent;
 const galleryContent = window.__INITIAL_GALLERY__ ?? defaultGalleryContent;
+const journalContent = window.__INITIAL_JOURNAL__ ?? defaultJournalContent;
 const contactContent = window.__INITIAL_CONTACT__ ?? defaultContactContent;
 const craftsmanshipContent = window.__INITIAL_CRAFTSMANSHIP__ ?? defaultCraftsmanshipContent;
 const routePath = window.location.pathname;
@@ -37,6 +40,7 @@ if (rootElement.hasChildNodes()) {
       heroContent={heroContent}
       aboutContent={aboutContent}
       galleryContent={galleryContent}
+      journalContent={journalContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
       routePath={routePath}
@@ -48,6 +52,7 @@ if (rootElement.hasChildNodes()) {
       heroContent={heroContent}
       aboutContent={aboutContent}
       galleryContent={galleryContent}
+      journalContent={journalContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
       routePath={routePath}

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { renderToStaticMarkup } from 'react-dom/server';
 import App from '../src/app/App';
 import { defaultGalleryContent, type GalleryContent } from '../src/app/lib/gallery';
+import { defaultJournalContent, type JournalContent } from '../src/app/lib/journal';
 import { render as renderEntryServer } from '../src/entry-server';
 import type { HeroContent } from '../src/app/lib/heroContent';
 import type { AboutContent } from '../src/app/lib/aboutContent';
@@ -62,6 +63,21 @@ function createCraftsmanshipContent(): CraftsmanshipContent {
   };
 }
 
+function createJournalContent(): JournalContent {
+  return {
+    ...defaultJournalContent,
+    previewHeading: 'Dynamic Journal Preview',
+    pageHeading: 'Dynamic Journal Heading',
+    posts: defaultJournalContent.posts.map((post, index) => ({
+      ...post,
+      id: `${post.id}-${index}`,
+      slug: `${post.slug}-${index}`,
+      title: `${post.title} ${index + 1}`,
+      featured: index === 0,
+    })),
+  };
+}
+
 function createContactContent(): ContactContent {
   return {
     eyebrow: 'TEST CONTACT EYEBROW',
@@ -91,12 +107,14 @@ test('App renders dynamic hero/about/contact text from props', () => {
   const galleryContent = createGalleryContent();
   const contactContent = createContactContent();
   const craftsmanshipContent = createCraftsmanshipContent();
+  const journalContent = createJournalContent();
 
   const html = renderToStaticMarkup(
     <App
       heroContent={heroContent}
       aboutContent={aboutContent}
       galleryContent={galleryContent}
+      journalContent={journalContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
     />
@@ -108,6 +126,7 @@ test('App renders dynamic hero/about/contact text from props', () => {
   assert.ok(html.includes(aboutContent.heading));
   assert.ok(html.includes(aboutContent.paragraph1));
   assert.ok(html.includes(galleryContent.previewHeading));
+  assert.ok(html.includes(journalContent.previewHeading));
   assert.ok(html.includes(contactContent.heading));
   assert.ok(html.includes(contactContent.nameLabel));
   assert.ok(html.includes(contactContent.submitText));
@@ -124,12 +143,14 @@ test('Contact section keeps dynamic form field text and direct contacts', () => 
   const galleryContent = createGalleryContent();
   const contactContent = createContactContent();
   const craftsmanshipContent = createCraftsmanshipContent();
+  const journalContent = createJournalContent();
 
   const html = renderToStaticMarkup(
     <App
       heroContent={heroContent}
       aboutContent={aboutContent}
       galleryContent={galleryContent}
+      journalContent={journalContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
     />
@@ -148,8 +169,16 @@ test('SSR entry render includes dynamic content values', () => {
   const galleryContent = createGalleryContent();
   const contactContent = createContactContent();
   const craftsmanshipContent = createCraftsmanshipContent();
+  const journalContent = createJournalContent();
 
-  const html = renderEntryServer(heroContent, aboutContent, galleryContent, contactContent, craftsmanshipContent);
+  const html = renderEntryServer(
+    heroContent,
+    aboutContent,
+    galleryContent,
+    journalContent,
+    contactContent,
+    craftsmanshipContent
+  );
 
   assert.ok(html.includes(heroContent.description));
   assert.ok(html.includes(aboutContent.paragraph2));
@@ -167,6 +196,7 @@ test('App trims dynamic content and skips empty dynamic contact entries', () => 
 
   const aboutContent = createAboutContent();
   const galleryContent = createGalleryContent();
+  const journalContent = createJournalContent();
   const craftsmanshipContent: CraftsmanshipContent = {
     ...createCraftsmanshipContent(),
     items: [
@@ -190,6 +220,7 @@ test('App trims dynamic content and skips empty dynamic contact entries', () => 
       heroContent={heroContent}
       aboutContent={aboutContent}
       galleryContent={galleryContent}
+      journalContent={journalContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
     />
@@ -209,6 +240,7 @@ test('gallery route renders the editorial gallery structure', () => {
       heroContent={createHeroContent()}
       aboutContent={createAboutContent()}
       galleryContent={createGalleryContent()}
+      journalContent={createJournalContent()}
       contactContent={createContactContent()}
       craftsmanshipContent={createCraftsmanshipContent()}
       routePath="/gallery"
@@ -221,4 +253,43 @@ test('gallery route renders the editorial gallery structure', () => {
   assert.ok(html.includes('Room index'));
   assert.ok(html.includes('Lead piece'));
   assert.ok(html.includes('Inquire for Details'));
+});
+
+test('journal route renders dynamic journal index content', () => {
+  const journalContent = createJournalContent();
+  const html = renderToStaticMarkup(
+    <App
+      heroContent={createHeroContent()}
+      aboutContent={createAboutContent()}
+      galleryContent={createGalleryContent()}
+      journalContent={journalContent}
+      contactContent={createContactContent()}
+      craftsmanshipContent={createCraftsmanshipContent()}
+      routePath="/journal"
+    />
+  );
+
+  assert.ok(html.includes('Dynamic Journal Heading'));
+  assert.ok(html.includes(journalContent.posts[0].title));
+  assert.ok(html.includes('Featured Journal'));
+});
+
+test('journal article route renders article page content', () => {
+  const journalContent = createJournalContent();
+  const article = journalContent.posts[0];
+  const html = renderToStaticMarkup(
+    <App
+      heroContent={createHeroContent()}
+      aboutContent={createAboutContent()}
+      galleryContent={createGalleryContent()}
+      journalContent={journalContent}
+      contactContent={createContactContent()}
+      craftsmanshipContent={createCraftsmanshipContent()}
+      routePath={`/journal/${article.slug}`}
+    />
+  );
+
+  assert.ok(html.includes(article.title));
+  assert.ok(html.includes('Back to Journal'));
+  assert.ok(html.includes('Continue in the Journal'));
 });
