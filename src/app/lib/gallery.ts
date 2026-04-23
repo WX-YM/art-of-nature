@@ -93,7 +93,7 @@ const categoryDefinitions: GalleryCategoryDefinition[] = [
     name: 'Outdoor Seating',
     eyebrow: 'Gallery III',
     description:
-      'Open-air pieces documented through benches, lighting, planters, and relaxed exterior gatherings.',
+      'Open-air pieces documented through benches, lounge seating, lighting, planters, and relaxed exterior gatherings.',
     subcategories: ['Chairs', 'Tables', 'Sofa', 'Lights'],
   },
   {
@@ -1240,7 +1240,20 @@ function inferPlacement(folderKey: string): {
         return { category: 'Dining Room', subcategory: 'Benches' };
       }
       if (name.includes('sofa')) {
+        if (name.includes('old flank wood')) {
+          return { category: 'Outdoor Seating', subcategory: 'Sofa' };
+        }
         return { category: 'Living Room', subcategory: 'Sofa' };
+      }
+      if (name.includes('rocking') || name.includes('shoe rack')) {
+        return { category: 'Bedroom', subcategory: 'Chairs' };
+      }
+      if (
+        name.includes('side chair') ||
+        name === 'massive beech wood chair' ||
+        name.includes('olive wood side chair')
+      ) {
+        return { category: 'Dining Room', subcategory: 'Chairs' };
       }
       return { category: 'Living Room', subcategory: 'Chairs' };
     case 'coffee tables':
@@ -1267,6 +1280,9 @@ function inferPlacement(folderKey: string): {
       if (name.includes('soap')) {
         return { category: 'Restroom', subcategory: 'Holders' };
       }
+      if (name.includes('side lamp')) {
+        return { category: 'Bedroom', subcategory: 'Lights' };
+      }
       if (name.includes('lamp')) {
         return { category: 'Living Room', subcategory: 'Lights' };
       }
@@ -1286,16 +1302,22 @@ function inferPlacement(folderKey: string): {
       if (name.includes('wall mount')) {
         return { category: 'Restroom', subcategory: 'Lights' };
       }
-      if (name.includes('chandelier')) {
+      if (name.includes('chandelier') || name.includes('chandlier')) {
         return { category: 'Dining Room', subcategory: 'Lights' };
+      }
+      if (name.includes('side lamp')) {
+        return { category: 'Bedroom', subcategory: 'Lights' };
       }
       return { category: 'Living Room', subcategory: 'Lights' };
     case 'mirrors':
       if (name.includes('frameless') || name.includes('irregular')) {
         return { category: 'Restroom', subcategory: 'Mirrors' };
       }
-      if (name.includes('door') || name.includes('rectangular')) {
+      if (name.includes('door') || name.includes('rectangular') || name.includes('rectangelar')) {
         return { category: 'Bedroom', subcategory: 'Mirrors' };
+      }
+      if (name.includes('oak tree wood mirror') || name.includes('round mirror')) {
+        return { category: 'Dining Room', subcategory: 'Mirrors' };
       }
       return { category: 'Living Room', subcategory: 'Mirrors' };
     case 'plant pots':

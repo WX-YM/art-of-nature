@@ -29,7 +29,9 @@ describe('Admin Security Protections', () => {
 
   after(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    await vite.close();
+    if (vite) {
+      await vite.close();
+    }
     await mongoose.disconnect();
   });
 

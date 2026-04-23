@@ -1,16 +1,48 @@
-export function Footer() {
+import type { MouseEvent } from 'react';
+
+type FooterProps = {
+  currentPath?: string;
+  onNavigate?: (href: string) => void;
+};
+
+function shouldHandleClientNavigation(event: MouseEvent<HTMLAnchorElement>, href: string) {
+  if (!href.startsWith('/')) {
+    return false;
+  }
+
+  return (
+    event.button === 0 &&
+    !event.defaultPrevented &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey
+  );
+}
+
+export function Footer({ currentPath = '/', onNavigate }: FooterProps) {
   const year = new Date().getFullYear();
+  const isGalleryPage = currentPath === '/gallery';
   const navigationItems = [
-    { href: '#work', label: 'Work' },
-    { href: '#about', label: 'About' },
-    { href: '#journal', label: 'Journal' },
-    { href: '#contact', label: 'Contact' },
+    { href: '/gallery', label: 'Gallery' },
+    { href: isGalleryPage ? '/#about' : '#about', label: 'About' },
+    { href: isGalleryPage ? '/#journal' : '#journal', label: 'Journal' },
+    { href: isGalleryPage ? '/#contact' : '#contact', label: 'Contact' },
   ];
   const connectItems = [
     { href: 'mailto:info@artofnatureeg.com', label: 'Email the studio' },
     { href: 'tel:+201030422422', label: 'Call +20 103 042 2422' },
-    { href: '#top', label: 'Back to top' },
+    { href: isGalleryPage ? '/gallery' : '#top', label: 'Back to top' },
   ];
+
+  const handleNavigationClick = (event: MouseEvent<HTMLAnchorElement>, href: string) => {
+    if (!onNavigate || !shouldHandleClientNavigation(event, href)) {
+      return;
+    }
+
+    event.preventDefault();
+    onNavigate(href);
+  };
 
   return (
     <footer className="bg-primary py-16 text-primary-foreground">
@@ -28,7 +60,12 @@ export function Footer() {
             <h4 className="mb-4 text-sm uppercase tracking-[0.24em] text-primary-foreground/48">Navigation</h4>
             <nav className="flex flex-col gap-3 text-primary-foreground/74">
               {navigationItems.map((item) => (
-                <a key={item.href} href={item.href} className="transition-opacity hover:opacity-100">
+                <a
+                  key={item.href}
+                  href={item.href}
+                  className="transition-opacity hover:opacity-100"
+                  onClick={(event) => handleNavigationClick(event, item.href)}
+                >
                   {item.label}
                 </a>
               ))}
@@ -39,7 +76,12 @@ export function Footer() {
             <h4 className="mb-4 text-sm uppercase tracking-[0.24em] text-primary-foreground/48">Connect</h4>
             <nav className="flex flex-col gap-3 text-primary-foreground/74">
               {connectItems.map((item) => (
-                <a key={item.href} href={item.href} className="transition-opacity hover:opacity-100">
+                <a
+                  key={item.href}
+                  href={item.href}
+                  className="transition-opacity hover:opacity-100"
+                  onClick={(event) => handleNavigationClick(event, item.href)}
+                >
                   {item.label}
                 </a>
               ))}

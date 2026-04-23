@@ -21,6 +21,43 @@ export type UploadRequestBody = {
   base64Data?: string;
 };
 
+const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const jpegSignature = Buffer.from([0xff, 0xd8, 0xff]);
+const gif87aSignature = Buffer.from('GIF87a', 'ascii');
+const gif89aSignature = Buffer.from('GIF89a', 'ascii');
+const riffSignature = Buffer.from('RIFF', 'ascii');
+const webpSignature = Buffer.from('WEBP', 'ascii');
+const ftypSignature = Buffer.from('ftyp', 'ascii');
+const avifBrands = new Set(['avif', 'avis']);
+
+function bufferStartsWith(buffer: Buffer, signature: Buffer) {
+  return buffer.length >= signature.length && buffer.subarray(0, signature.length).equals(signature);
+}
+
+function bufferContainsSignature(buffer: Buffer, signature: Buffer, start: number) {
+  return buffer.length >= start + signature.length && buffer.subarray(start, start + signature.length).equals(signature);
+}
+
+function hasExpectedImageSignature(buffer: Buffer, mimeType: string) {
+  switch (mimeType) {
+    case 'image/png':
+      return bufferStartsWith(buffer, pngSignature);
+    case 'image/jpeg':
+      return bufferStartsWith(buffer, jpegSignature);
+    case 'image/gif':
+      return bufferStartsWith(buffer, gif87aSignature) || bufferStartsWith(buffer, gif89aSignature);
+    case 'image/webp':
+      return bufferStartsWith(buffer, riffSignature) && bufferContainsSignature(buffer, webpSignature, 8);
+    case 'image/avif':
+      return (
+        bufferContainsSignature(buffer, ftypSignature, 4) &&
+        avifBrands.has(buffer.subarray(8, 12).toString('ascii'))
+      );
+    default:
+      return false;
+  }
+}
+
 export async function saveUploadedImage(body: unknown, targetDir: string = uploadsDir, maxSize: number = maxUploadSizeBytes) {
   const payload = body as UploadRequestBody;
   const mimeType = typeof payload?.mimeType === 'string' ? payload.mimeType.trim().toLowerCase() : '';
@@ -38,6 +75,10 @@ export async function saveUploadedImage(body: unknown, targetDir: string = uploa
   const fileBuffer = Buffer.from(base64Data, 'base64');
   if (!fileBuffer.length || fileBuffer.length > maxSize) {
     throw new Error('Invalid image size.');
+  }
+
+  if (!hasExpectedImageSignature(fileBuffer, mimeType)) {
+    throw new Error('Invalid image data.');
   }
 
   const uploadedName = `${Date.now()}-${randomBytes(8).toString('hex')}.${extension}`;

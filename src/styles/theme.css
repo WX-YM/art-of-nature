@@ -211,6 +211,12 @@
     @apply mx-auto max-w-7xl px-6 lg:px-12;
   }
 
+  .gallery-shell {
+    width: min(100%, 104rem);
+    margin-inline: auto;
+    padding-inline: clamp(1.5rem, 2.6vw, 3.75rem);
+  }
+
   .section-kicker {
     @apply mb-4 block text-[0.78rem] font-medium tracking-[0.32em] uppercase opacity-65;
   }
@@ -245,6 +251,16 @@
 @media (min-width: 1280px) {
   .gallery-masonry {
     columns: 2;
+  }
+}
+
+@media (min-width: 1536px) {
+  .gallery-shell {
+    width: min(100%, 110rem);
+  }
+
+  .gallery-masonry {
+    columns: 3;
   }
 }
 

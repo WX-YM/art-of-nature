@@ -1,11 +1,28 @@
 import { Menu, X } from 'lucide-react';
+import type { MouseEvent } from 'react';
 import { useEffect, useState } from 'react';
 
 type NavigationProps = {
   currentPath?: string;
+  onNavigate?: (href: string) => void;
 };
 
-export function Navigation({ currentPath = '/' }: NavigationProps) {
+function shouldHandleClientNavigation(event: MouseEvent<HTMLAnchorElement>, href: string) {
+  if (!href.startsWith('/')) {
+    return false;
+  }
+
+  return (
+    event.button === 0 &&
+    !event.defaultPrevented &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey
+  );
+}
+
+export function Navigation({ currentPath = '/', onNavigate }: NavigationProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const isGalleryPage = currentPath === '/gallery';
@@ -38,6 +55,16 @@ export function Navigation({ currentPath = '/' }: NavigationProps) {
     };
   }, [isMenuOpen]);
 
+  const handleNavigationClick = (event: MouseEvent<HTMLAnchorElement>, href: string) => {
+    if (!onNavigate || !shouldHandleClientNavigation(event, href)) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsMenuOpen(false);
+    onNavigate(href);
+  };
+
   return (
     <nav
       className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${
@@ -47,7 +74,7 @@ export function Navigation({ currentPath = '/' }: NavigationProps) {
       }`}
     >
       <div className="section-shell flex items-center justify-between py-4 sm:py-5">
-        <a href={homeHref} className="min-w-0">
+        <a href={homeHref} className="min-w-0" onClick={(event) => handleNavigationClick(event, homeHref)}>
           <div className="text-sm font-semibold uppercase tracking-[0.35em] text-foreground/75 sm:text-base">
             Art of Nature
           </div>
@@ -55,13 +82,19 @@ export function Navigation({ currentPath = '/' }: NavigationProps) {
 
         <div className="hidden items-center gap-8 lg:flex">
           {navigationItems.map((item) => (
-            <a key={item.href} href={item.href} className="text-sm transition-colors hover:text-accent">
+            <a
+              key={item.href}
+              href={item.href}
+              className="text-sm transition-colors hover:text-accent"
+              onClick={(event) => handleNavigationClick(event, item.href)}
+            >
               {item.label}
             </a>
           ))}
           <a
             href={contactHref}
             className="inline-flex items-center justify-center border border-primary bg-primary px-6 py-3 text-sm text-primary-foreground transition-all hover:border-accent hover:bg-accent"
+            onClick={(event) => handleNavigationClick(event, contactHref)}
           >
             Get in Touch
           </a>
@@ -89,7 +122,7 @@ export function Navigation({ currentPath = '/' }: NavigationProps) {
               key={item.href}
               href={item.href}
               className="flex items-center justify-between border border-border/70 bg-white/80 px-4 py-4 text-base transition-colors hover:border-accent hover:text-accent"
-              onClick={() => setIsMenuOpen(false)}
+              onClick={(event) => handleNavigationClick(event, item.href)}
             >
               {item.label}
               <span className="text-xl leading-none">+</span>
@@ -98,7 +131,7 @@ export function Navigation({ currentPath = '/' }: NavigationProps) {
           <a
             href={contactHref}
             className="mt-2 inline-flex items-center justify-center bg-primary px-5 py-4 text-center text-sm text-primary-foreground transition-colors hover:bg-accent"
-            onClick={() => setIsMenuOpen(false)}
+            onClick={(event) => handleNavigationClick(event, contactHref)}
           >
             Start Your Project
           </a>

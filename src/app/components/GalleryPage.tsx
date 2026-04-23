@@ -1,4 +1,5 @@
 import { ArrowUpRight } from 'lucide-react';
+import { useState } from 'react';
 import {
   buildGalleryCategories,
   getGalleryCategoryId,
@@ -7,6 +8,7 @@ import {
   type GallerySubcategory,
 } from '../lib/gallery';
 import { GalleryImage } from './GalleryImage';
+import { GalleryPieceViewer } from './GalleryPieceViewer';
 
 type GalleryPageProps = {
   content: GalleryContent;
@@ -18,23 +20,59 @@ function getPieceCount(category: {
   return category.subcategories.reduce((total, subcategory) => total + subcategory.pieces.length, 0);
 }
 
-function EmptyCollectionCard({ subcategory }: { subcategory: GallerySubcategory }) {
+function getImageCount(category: {
+  subcategories: Array<{ pieces: GalleryPiece[] }>;
+}) {
+  return category.subcategories.reduce(
+    (total, subcategory) =>
+      total + subcategory.pieces.reduce((pieceTotal, piece) => pieceTotal + piece.images.length, 0),
+    0
+  );
+}
+
+function getLeadPiece(category: {
+  subcategories: Array<{ pieces: GalleryPiece[] }>;
+}) {
+  const pieces = category.subcategories.flatMap((subcategory) => subcategory.pieces);
+  return pieces.find((piece) => piece.featured) ?? pieces[0] ?? null;
+}
+
+function EmptyCollectionCard({
+  categoryName,
+  subcategory,
+}: {
+  categoryName: string;
+  subcategory: GallerySubcategory;
+}) {
   return (
-    <div className="panel-surface flex min-h-[17rem] flex-col justify-between p-6 sm:p-7">
+    <div className="border border-dashed border-border/85 bg-[rgba(255,255,255,0.58)] px-6 py-7 sm:px-7">
       <div>
-        <p className="text-[0.78rem] uppercase tracking-[0.28em] text-foreground/46">{subcategory.name}</p>
-        <h4 className="mt-4 text-[1.5rem] leading-tight text-foreground">Collection in Progress</h4>
-        <p className="mt-4 max-w-sm text-sm leading-8 text-foreground/68 sm:text-base">
-          This part of the gallery is being assembled with forthcoming documentation and installation photography.
+        <p className="text-[0.72rem] uppercase tracking-[0.28em] text-foreground/42">
+          {categoryName} / {subcategory.name}
+        </p>
+        <h4 className="mt-3 text-[1.2rem] leading-tight text-foreground/78">Archive forthcoming</h4>
+        <p className="mt-3 max-w-md text-sm leading-7 text-foreground/58 sm:text-[0.98rem]">
+          The first documentation set for this section is still being curated and will join the archive once the
+          final photography is assembled.
         </p>
       </div>
-      <p className="mt-8 text-xs uppercase tracking-[0.24em] text-foreground/40">Coming soon</p>
+      <p className="mt-6 text-[0.68rem] uppercase tracking-[0.24em] text-foreground/34">Collection in progress</p>
     </div>
   );
 }
 
-function PieceCard({ piece, index }: { piece: GalleryPiece; index: number }) {
+function PieceCard({
+  piece,
+  index,
+  onOpen,
+}: {
+  piece: GalleryPiece;
+  index: number;
+  onOpen: (piece: GalleryPiece, imageIndex?: number) => void;
+}) {
   const imageCount = piece.images.length;
+  const previewImages = imageCount === 1 ? piece.images : piece.images.slice(0, Math.min(imageCount, 3));
+  const hiddenImageCount = Math.max(imageCount - previewImages.length, 0);
 
   return (
     <article
@@ -43,39 +81,70 @@ function PieceCard({ piece, index }: { piece: GalleryPiece; index: number }) {
     >
       <div className="space-y-3 border-b border-border/70 p-5 sm:p-6">
         <p className="text-[0.78rem] uppercase tracking-[0.28em] text-foreground/50">{piece.subcategory}</p>
-        <h4 className="text-[1.45rem] leading-tight transition-colors group-hover:text-accent sm:text-[1.75rem]">
+        <button
+          type="button"
+          onClick={() => onOpen(piece, 0)}
+          className="text-left text-[1.45rem] leading-tight transition-colors hover:text-accent sm:text-[1.75rem]"
+        >
           {piece.title}
-        </h4>
+        </button>
         <p className="text-sm leading-7 text-foreground/68 sm:text-base">{piece.material}</p>
         <p className="text-sm leading-7 text-foreground/62">{piece.note}</p>
         <p className="text-xs uppercase tracking-[0.22em] text-foreground/42">
           Archive set · {piece.archiveCount} image{piece.archiveCount === 1 ? '' : 's'}
         </p>
-        <p className="pt-2 text-sm font-medium text-foreground/80">Inquire for Details</p>
+        <div className="flex flex-wrap items-center gap-4 pt-2">
+          <button
+            type="button"
+            onClick={() => onOpen(piece, 0)}
+            className="inline-flex items-center gap-2 text-sm font-medium text-foreground/80 transition-colors hover:text-accent"
+          >
+            Open archive
+            <ArrowUpRight size={15} />
+          </button>
+          <a href="/#contact" className="text-sm font-medium text-foreground/72 transition-colors hover:text-accent">
+            Inquire for Details
+          </a>
+        </div>
       </div>
       <div className="grid gap-3 p-5 sm:grid-cols-2 sm:p-6">
-        {piece.images.map((asset, assetIndex) => (
-          <div
-            key={asset.src}
-            className={
-              imageCount === 1
-                ? 'h-[20rem] sm:h-[24rem]'
-                : assetIndex === 0
-                  ? 'h-[20rem] sm:col-span-2 sm:h-[28rem]'
-                  : 'h-[13rem] sm:h-[15rem]'
-            }
-          >
-            <GalleryImage
-              asset={asset}
-              className="h-full w-full"
-              sizes={
-                imageCount === 1 || assetIndex === 0
-                  ? '(min-width: 1024px) 24rem, (min-width: 640px) 50vw, 100vw'
-                  : '(min-width: 1024px) 12rem, (min-width: 640px) 24rem, 50vw'
+        {previewImages.map((asset, assetIndex) => {
+          const isLastVisibleImage = assetIndex === previewImages.length - 1;
+          const showMoreOverlay = hiddenImageCount > 0 && isLastVisibleImage;
+
+          return (
+            <button
+              type="button"
+              key={asset.src}
+              onClick={() => onOpen(piece, assetIndex)}
+              className={
+                imageCount === 1
+                  ? 'h-[20rem] overflow-hidden text-left sm:h-[24rem]'
+                  : assetIndex === 0
+                    ? 'h-[20rem] overflow-hidden text-left sm:col-span-2 sm:h-[28rem]'
+                    : 'h-[13rem] overflow-hidden text-left sm:h-[15rem]'
               }
-            />
-          </div>
-        ))}
+            >
+              <div className="relative h-full w-full">
+                <GalleryImage
+                  asset={asset}
+                  className="h-full w-full transition-transform duration-700 group-hover:scale-[1.02]"
+                  sizes={
+                    imageCount === 1 || assetIndex === 0
+                      ? '(min-width: 1024px) 24rem, (min-width: 640px) 50vw, 100vw'
+                      : '(min-width: 1024px) 12rem, (min-width: 640px) 24rem, 50vw'
+                  }
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/38 via-transparent to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100" />
+                {showMoreOverlay ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/26 text-center text-lg font-medium text-white backdrop-blur-[1px]">
+                    +{hiddenImageCount} more
+                  </div>
+                ) : null}
+              </div>
+            </button>
+          );
+        })}
       </div>
     </article>
   );
@@ -83,10 +152,14 @@ function PieceCard({ piece, index }: { piece: GalleryPiece; index: number }) {
 
 export function GalleryPage({ content }: GalleryPageProps) {
   const galleryCategories = buildGalleryCategories(content);
+  const [viewerState, setViewerState] = useState<{ piece: GalleryPiece | null; imageIndex: number }>({
+    piece: null,
+    imageIndex: 0,
+  });
 
   return (
     <main className="pb-20 pt-28 sm:pt-32 lg:pb-32">
-      <section className="section-shell">
+      <section className="gallery-shell">
         <div className="reveal-up grid gap-10 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
           <div>
             <p className="section-kicker">{content.pageEyebrow}</p>
@@ -102,7 +175,7 @@ export function GalleryPage({ content }: GalleryPageProps) {
         </div>
       </section>
 
-      <section className="section-shell mt-14 sm:mt-16">
+      <section className="gallery-shell mt-14 sm:mt-16">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {galleryCategories.map((category, index) => {
             const pieceCount = getPieceCount(category);
@@ -130,70 +203,189 @@ export function GalleryPage({ content }: GalleryPageProps) {
         </div>
       </section>
 
-      <section className="section-shell mt-16 space-y-16 sm:space-y-20 lg:mt-20 lg:space-y-24">
+      <section className="gallery-shell mt-16 space-y-16 sm:space-y-20 lg:mt-20 lg:space-y-24">
         {galleryCategories.map((category, categoryIndex) => (
-          <section
-            key={category.name}
-            id={getGalleryCategoryId(category.name)}
-            className="scroll-mt-28"
-          >
-            <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-              <div className="reveal-up max-w-2xl" style={{ animationDelay: `${0.05 * (categoryIndex + 1)}s` }}>
-                <p className="section-kicker">{category.eyebrow}</p>
-                <h2 style={{ fontSize: 'clamp(2.2rem, 4vw, 4rem)', lineHeight: '1.02' }}>
-                  {category.name}
-                </h2>
-                <p className="mt-4 text-[1rem] leading-8 text-foreground/68 sm:text-[1.05rem]">
-                  {category.description}
-                </p>
-              </div>
-              <a href="/#contact" className="reveal-up inline-flex items-center gap-2 self-start text-sm font-medium text-foreground transition-colors hover:text-accent" style={{ animationDelay: `${0.08 * (categoryIndex + 1)}s` }}>
-                Inquire for Details
-                <ArrowUpRight size={16} />
-              </a>
-            </div>
+          <section key={category.name} id={getGalleryCategoryId(category.name)} className="scroll-mt-28">
+            {(() => {
+              const pieceCount = getPieceCount(category);
+              const imageCount = getImageCount(category);
+              const leadPiece = getLeadPiece(category);
+              const roomNumber = String(categoryIndex + 1).padStart(2, '0');
 
-            <div className="grid gap-6 lg:grid-cols-[0.28fr_0.72fr]">
-              <div className="reveal-up panel-surface h-fit p-6" style={{ animationDelay: `${0.1 * (categoryIndex + 1)}s` }}>
-                <p className="text-[0.78rem] uppercase tracking-[0.28em] text-foreground/46">Sections</p>
-                <div className="mt-5 flex flex-wrap gap-2">
-                  {category.subcategories.map((subcategory) => (
-                    <span
-                      key={subcategory.name}
-                      className="border border-border bg-white px-3 py-2 text-xs uppercase tracking-[0.18em] text-foreground/62"
+              return (
+                <>
+                  <div className="mb-9 grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(21rem,28rem)] xl:items-end 2xl:gap-10">
+                    <div
+                      className="reveal-up border-t border-border/80 pt-5"
+                      style={{ animationDelay: `${0.05 * (categoryIndex + 1)}s` }}
                     >
-                      {subcategory.name}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-8">
-                {category.subcategories.map((subcategory) => (
-                  <section key={`${category.name}-${subcategory.name}`} className="space-y-4">
-                    <div className="flex items-center justify-between gap-4 border-b border-border/80 pb-3">
-                      <h3 className="text-[1.45rem] leading-tight">{subcategory.name}</h3>
-                      <span className="text-xs uppercase tracking-[0.22em] text-foreground/42">
-                        {subcategory.pieces.length > 0 ? `${subcategory.pieces.length} piece${subcategory.pieces.length > 1 ? 's' : ''}` : 'Archive pending'}
-                      </span>
+                      <div className="mb-5 flex items-center gap-4">
+                        <span className="text-[0.72rem] uppercase tracking-[0.28em] text-foreground/42">
+                          Room {roomNumber}
+                        </span>
+                        <span className="h-px flex-1 bg-border/80" />
+                      </div>
+                      <p className="section-kicker">{category.eyebrow}</p>
+                      <h2 style={{ fontSize: 'clamp(2.2rem, 4vw, 4rem)', lineHeight: '1.02' }}>
+                        {category.name}
+                      </h2>
+                      <p className="mt-4 max-w-4xl text-[1rem] leading-8 text-foreground/68 sm:text-[1.05rem]">
+                        {category.description}
+                      </p>
+                      <div className="mt-6 flex flex-wrap gap-3 text-[0.72rem] uppercase tracking-[0.24em] text-foreground/42">
+                        <span>{category.subcategories.length} sections</span>
+                        <span>{pieceCount} pieces</span>
+                        <span>{imageCount} archive images</span>
+                      </div>
                     </div>
 
-                    {subcategory.pieces.length > 0 ? (
-                      <div className="gallery-masonry">
-                        {subcategory.pieces.map((piece, index) => (
-                          <PieceCard key={piece.id} piece={piece} index={index} />
-                        ))}
+                    <div
+                      className="reveal-up panel-surface overflow-hidden p-3 sm:p-4"
+                      style={{ animationDelay: `${0.09 * (categoryIndex + 1)}s` }}
+                    >
+                      {leadPiece ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setViewerState({ piece: leadPiece, imageIndex: 0 })}
+                            className="group block w-full text-left"
+                          >
+                            <div className="h-[14rem] overflow-hidden sm:h-[16rem]">
+                              <GalleryImage
+                                asset={leadPiece.image}
+                                className="h-full w-full transition-transform duration-700 group-hover:scale-[1.02]"
+                                sizes="(min-width: 1024px) 23rem, 100vw"
+                              />
+                            </div>
+                          </button>
+                          <div className="border-t border-border/70 px-1 pb-1 pt-4">
+                            <p className="text-[0.72rem] uppercase tracking-[0.24em] text-foreground/42">
+                              Lead piece
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => setViewerState({ piece: leadPiece, imageIndex: 0 })}
+                              className="mt-2 text-left text-[1.25rem] leading-tight transition-colors hover:text-accent"
+                            >
+                              {leadPiece.title}
+                            </button>
+                            <div className="mt-4 flex items-center justify-between gap-3 text-[0.72rem] uppercase tracking-[0.22em] text-foreground/40">
+                              <span>{leadPiece.archiveCount} images</span>
+                              <span>{leadPiece.subcategory}</span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex h-full min-h-[14rem] flex-col justify-between border border-dashed border-border/70 bg-white/55 p-5">
+                          <div>
+                            <p className="text-[0.72rem] uppercase tracking-[0.24em] text-foreground/40">Room note</p>
+                            <p className="mt-3 text-[1.15rem] leading-tight text-foreground/76">
+                              Documentation for this room is still being assembled.
+                            </p>
+                          </div>
+                          <p className="text-[0.68rem] uppercase tracking-[0.22em] text-foreground/34">Archive forthcoming</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)] 2xl:grid-cols-[19.5rem_minmax(0,1fr)] 2xl:gap-8">
+                    <div
+                      className="reveal-up panel-surface h-fit p-6 xl:sticky xl:top-28"
+                      style={{ animationDelay: `${0.1 * (categoryIndex + 1)}s` }}
+                    >
+                      <p className="text-[0.78rem] uppercase tracking-[0.28em] text-foreground/46">Room index</p>
+                      <div className="mt-5 space-y-3 text-sm text-foreground/68">
+                        <div className="flex items-center justify-between gap-4 border-b border-border/60 pb-3">
+                          <span>Sections</span>
+                          <span className="text-[0.74rem] uppercase tracking-[0.22em] text-foreground/42">
+                            {category.subcategories.length}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 border-b border-border/60 pb-3">
+                          <span>Pieces</span>
+                          <span className="text-[0.74rem] uppercase tracking-[0.22em] text-foreground/42">
+                            {pieceCount}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 pb-1">
+                          <span>Images</span>
+                          <span className="text-[0.74rem] uppercase tracking-[0.22em] text-foreground/42">
+                            {imageCount}
+                          </span>
+                        </div>
                       </div>
-                    ) : (
-                      <EmptyCollectionCard subcategory={subcategory} />
-                    )}
-                  </section>
-                ))}
-              </div>
-            </div>
+                      <div className="mt-6 border-t border-border/70 pt-5">
+                        <p className="text-[0.72rem] uppercase tracking-[0.24em] text-foreground/42">Sections</p>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {category.subcategories.map((subcategory) => (
+                            <span
+                              key={subcategory.name}
+                              className="border border-border bg-white px-3 py-2 text-xs uppercase tracking-[0.18em] text-foreground/62"
+                            >
+                              {subcategory.name}
+                            </span>
+                          ))}
+                        </div>
+                        <a
+                          href="/#contact"
+                          className="mt-6 inline-flex items-center gap-2 text-sm font-medium text-foreground transition-colors hover:text-accent"
+                        >
+                          Inquire for Details
+                          <ArrowUpRight size={16} />
+                        </a>
+                      </div>
+                    </div>
+
+                    <div className="space-y-8">
+                      {category.subcategories.map((subcategory) => (
+                        <section key={`${category.name}-${subcategory.name}`} className="space-y-4">
+                          <div className="flex items-center justify-between gap-4 border-b border-border/80 pb-3">
+                            <h3 className="text-[1.45rem] leading-tight">{subcategory.name}</h3>
+                            <span className="text-xs uppercase tracking-[0.22em] text-foreground/42">
+                              {subcategory.pieces.length > 0
+                                ? `${subcategory.pieces.length} piece${subcategory.pieces.length > 1 ? 's' : ''}`
+                                : 'Archive pending'}
+                            </span>
+                          </div>
+
+                          {subcategory.pieces.length > 0 ? (
+                            <div className="gallery-masonry">
+                              {subcategory.pieces.map((piece, index) => (
+                                <PieceCard
+                                  key={piece.id}
+                                  piece={piece}
+                                  index={index}
+                                  onOpen={(selectedPiece, imageIndex = 0) => {
+                                    setViewerState({ piece: selectedPiece, imageIndex });
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          ) : (
+                            <EmptyCollectionCard categoryName={category.name} subcategory={subcategory} />
+                          )}
+                        </section>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
           </section>
         ))}
       </section>
+
+      <GalleryPieceViewer
+        piece={viewerState.piece}
+        open={Boolean(viewerState.piece)}
+        initialImageIndex={viewerState.imageIndex}
+        onOpenChange={(open) => {
+          if (!open) {
+            setViewerState({ piece: null, imageIndex: 0 });
+          }
+        }}
+      />
     </main>
   );
 }

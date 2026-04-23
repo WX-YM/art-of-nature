@@ -5,6 +5,9 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { saveUploadedImage, listUploads } from '../server/upload-service';
 
+const minimalPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+const minimalJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0xff, 0xd9]);
+
 function generateRandomDir() {
   return path.resolve(process.cwd(), '.temp-test-uploads', randomBytes(8).toString('hex'));
 }
@@ -28,16 +31,21 @@ test('saveUploadedImage rejects unsupported types and oversized data', async () 
     { message: 'Invalid file type.' }
   );
 
+  await assert.rejects(
+    async () => saveUploadedImage({ mimeType: 'image/png', base64Data: Buffer.from('not-an-image').toString('base64') }, dir),
+    { message: 'Invalid image data.' }
+  );
+
   // 1-byte limit
   await assert.rejects(
-    async () => saveUploadedImage({ mimeType: 'image/jpeg', base64Data: Buffer.from('abc').toString('base64') }, dir, 1),
+    async () => saveUploadedImage({ mimeType: 'image/jpeg', base64Data: minimalJpeg.toString('base64') }, dir, 1),
     { message: 'Invalid image size.' }
   );
 });
 
 test('saveUploadedImage saves file successfully and listUploads retrieves it', async () => {
   const dir = generateRandomDir();
-  const fileData = Buffer.from('fake-image-bytes');
+  const fileData = minimalPng;
 
   const result = await saveUploadedImage(
     {
@@ -65,7 +73,7 @@ test('listUploads sorts files by modified date descending', async () => {
 
   // Save first file
   await saveUploadedImage(
-    { mimeType: 'image/jpeg', base64Data: Buffer.from('file1').toString('base64') },
+    { mimeType: 'image/jpeg', base64Data: minimalJpeg.toString('base64') },
     dir
   );
 
@@ -74,7 +82,7 @@ test('listUploads sorts files by modified date descending', async () => {
 
   // Save second file
   await saveUploadedImage(
-    { mimeType: 'image/jpeg', base64Data: Buffer.from('file2').toString('base64') },
+    { mimeType: 'image/jpeg', base64Data: minimalJpeg.toString('base64') },
     dir
   );
 

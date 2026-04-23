@@ -5,11 +5,18 @@ import type { GalleryImageAsset } from '../lib/gallery';
 type GalleryImageProps = {
   asset: GalleryImageAsset;
   className?: string;
+  imageClassName?: string;
   sizes?: string;
   priority?: boolean;
 };
 
-export function GalleryImage({ asset, className, sizes, priority = false }: GalleryImageProps) {
+export function GalleryImage({
+  asset,
+  className,
+  imageClassName,
+  sizes,
+  priority = false,
+}: GalleryImageProps) {
   const [isLoaded, setIsLoaded] = useState(false);
   const imageRef = useRef<HTMLImageElement | null>(null);
 
@@ -43,7 +50,7 @@ export function GalleryImage({ asset, className, sizes, priority = false }: Gall
         sizes={sizes}
         loading={priority ? 'eager' : 'lazy'}
         decoding="async"
-        className={`h-full w-full object-cover transition-transform duration-700 ${isLoaded ? 'opacity-100' : 'opacity-0'} `}
+        className={`h-full w-full object-cover transition-transform duration-700 ${isLoaded ? 'opacity-100' : 'opacity-0'} ${imageClassName ?? ''}`}
         onLoad={() => setIsLoaded(true)}
       />
     </div>

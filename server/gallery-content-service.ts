@@ -55,8 +55,41 @@ function normalizeImageAsset(value: unknown, fallbackTitle: string, index: numbe
   return {
     src,
     alt: alt.slice(0, 300),
-    width: widthValue,
-    height: heightValue,
+    ...(widthValue !== undefined ? { width: widthValue } : {}),
+    ...(heightValue !== undefined ? { height: heightValue } : {}),
+  };
+}
+
+const legacyPlacementOverrides = new Map<
+  string,
+  { category: GalleryCategoryName; subcategory: GallerySubcategoryName }
+>([
+  ['lighting-chandlier-from-tree-rings-with-live-edges', { category: 'Dining Room', subcategory: 'Lights' }],
+  ['home-accessories-side-lamp-from-live-tree-trunk', { category: 'Bedroom', subcategory: 'Lights' }],
+  ['chairs-diablo-side-chair-from-tree-stump-made-from-sisso-wood-whole-tree', { category: 'Dining Room', subcategory: 'Chairs' }],
+  ['chairs-massive-beech-wood-chair', { category: 'Dining Room', subcategory: 'Chairs' }],
+  ['chairs-massive-berry-wood-tree-side-chair', { category: 'Dining Room', subcategory: 'Chairs' }],
+  ['chairs-olive-wood-side-chair', { category: 'Dining Room', subcategory: 'Chairs' }],
+  ['chairs-rocking-chair-from-beech-wood', { category: 'Bedroom', subcategory: 'Chairs' }],
+  ['chairs-corner-chair-shoe-rack-with-shelves', { category: 'Bedroom', subcategory: 'Chairs' }],
+  ['chairs-mini-sofa-with-old-flank-wood', { category: 'Outdoor Seating', subcategory: 'Sofa' }],
+  ['chairs-sofa-from-old-flank-wood', { category: 'Outdoor Seating', subcategory: 'Sofa' }],
+  ['mirrors-oak-tree-wood-mirror-2-meter', { category: 'Dining Room', subcategory: 'Mirrors' }],
+  ['mirrors-round-mirror-from-tree-trunks', { category: 'Dining Room', subcategory: 'Mirrors' }],
+  ['mirrors-rectangelar-shape-mirror', { category: 'Bedroom', subcategory: 'Mirrors' }],
+]);
+
+function applyLegacyPlacementOverride(piece: GalleryPiece): GalleryPiece {
+  const override = legacyPlacementOverrides.get(piece.id);
+
+  if (!override) {
+    return piece;
+  }
+
+  return {
+    ...piece,
+    category: override.category,
+    subcategory: override.subcategory,
   };
 }
 
@@ -99,7 +132,12 @@ function normalizePiece(value: unknown): GalleryPiece | null {
     return null;
   }
 
-  return {
+  const preferredCoverImage =
+    coverImage && images.some((asset) => asset.src === coverImage.src)
+      ? images.find((asset) => asset.src === coverImage.src) ?? images[0]
+      : coverImage ?? images[0];
+
+  const normalizedPiece: GalleryPiece = {
     id,
     title,
     category,
@@ -108,9 +146,11 @@ function normalizePiece(value: unknown): GalleryPiece | null {
     note,
     archiveCount: images.length,
     featured: raw.featured === true,
-    image: images[0],
+    image: preferredCoverImage,
     images,
   };
+
+  return applyLegacyPlacementOverride(normalizedPiece);
 }
 
 function normalizeCategories(categories: unknown): GalleryCategoryDefinition[] {
@@ -157,7 +197,7 @@ export async function getGalleryContent(): Promise<GalleryContent> {
   const doc = await GalleryContentModel.findOne<GalleryContentDocument>({ key: GALLERY_KEY }).lean();
 
   if (!doc) {
-    return defaultGalleryContent;
+    return normalizeGalleryContent(defaultGalleryContent);
   }
 
   return normalizeGalleryContent(doc);

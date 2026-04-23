@@ -218,6 +218,7 @@ test('gallery route renders the editorial gallery structure', () => {
   assert.ok(html.includes('Dynamic Gallery Heading'));
   assert.ok(html.includes('Living Room'));
   assert.ok(html.includes('Dining Room'));
-  assert.ok(html.includes('Collection in Progress'));
+  assert.ok(html.includes('Room index'));
+  assert.ok(html.includes('Lead piece'));
   assert.ok(html.includes('Inquire for Details'));
 });

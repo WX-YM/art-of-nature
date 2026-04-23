@@ -1,6 +1,5 @@
 import { createRoot, hydrateRoot } from 'react-dom/client';
 import App from './app/App.tsx';
-import './styles/index.css';
 import { defaultGalleryContent, type GalleryContent } from './app/lib/gallery';
 import { defaultHeroContent, type HeroContent } from './app/lib/heroContent';
 import { defaultAboutContent, type AboutContent } from './app/lib/aboutContent';

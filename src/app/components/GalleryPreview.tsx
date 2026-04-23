@@ -1,6 +1,8 @@
 import { ArrowUpRight } from 'lucide-react';
-import { getGalleryCategoryHref, getHomepageGalleryPieces, type GalleryContent } from '../lib/gallery';
+import { useState } from 'react';
+import { getHomepageGalleryPieces, type GalleryContent } from '../lib/gallery';
 import { GalleryImage } from './GalleryImage';
+import { GalleryPieceViewer } from './GalleryPieceViewer';
 
 type GalleryPreviewProps = {
   content: GalleryContent;
@@ -8,6 +10,8 @@ type GalleryPreviewProps = {
 
 export function GalleryPreview({ content }: GalleryPreviewProps) {
   const featuredGalleryPieces = getHomepageGalleryPieces(content);
+  const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
+  const selectedPiece = featuredGalleryPieces.find((piece) => piece.id === selectedPieceId) ?? null;
 
   return (
     <section id="gallery-preview" className="scroll-mt-28 bg-background py-20 sm:py-24 lg:py-32">
@@ -36,12 +40,13 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
         <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="grid gap-6 sm:grid-cols-2">
             {featuredGalleryPieces.slice(0, 4).map((piece, index) => (
-              <a
+              <button
+                type="button"
                 key={piece.id}
-                href={getGalleryCategoryHref(piece.category)}
+                onClick={() => setSelectedPieceId(piece.id)}
                 className={`reveal-up group overflow-hidden border border-border bg-white shadow-[0_18px_45px_rgba(45,41,38,0.08)] ${
                   index === 0 ? 'sm:col-span-2' : ''
-                }`}
+                } text-left`}
                 style={{ animationDelay: `${0.1 * (index + 1)}s` }}
               >
                 <div className={index === 0 ? 'h-[22rem] sm:h-[34rem]' : 'h-[20rem] sm:h-[26rem]'}>
@@ -63,17 +68,22 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
                   <p className="text-xs uppercase tracking-[0.22em] text-foreground/42">
                     Archive set · {piece.archiveCount} image{piece.archiveCount === 1 ? '' : 's'}
                   </p>
+                  <div className="inline-flex items-center gap-2 pt-1 text-xs uppercase tracking-[0.2em] text-foreground/55 transition-colors group-hover:text-accent">
+                    Open archive
+                    <ArrowUpRight size={14} />
+                  </div>
                 </div>
-              </a>
+              </button>
             ))}
           </div>
 
           <div className="flex flex-col gap-6">
             {featuredGalleryPieces.slice(4, 6).map((piece, index) => (
-              <a
+              <button
+                type="button"
                 key={piece.id}
-                href={getGalleryCategoryHref(piece.category)}
-                className="reveal-up group overflow-hidden border border-border bg-white shadow-[0_18px_45px_rgba(45,41,38,0.08)]"
+                onClick={() => setSelectedPieceId(piece.id)}
+                className="reveal-up group overflow-hidden border border-border bg-white text-left shadow-[0_18px_45px_rgba(45,41,38,0.08)]"
                 style={{ animationDelay: `${0.16 + 0.1 * index}s` }}
               >
                 <div className="h-[18rem] sm:h-[22rem]">
@@ -94,8 +104,12 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
                   <p className="mt-4 text-xs uppercase tracking-[0.22em] text-foreground/42">
                     Archive set · {piece.archiveCount} image{piece.archiveCount === 1 ? '' : 's'}
                   </p>
+                  <div className="mt-4 inline-flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-foreground/55 transition-colors group-hover:text-accent">
+                    Open archive
+                    <ArrowUpRight size={14} />
+                  </div>
                 </div>
-              </a>
+              </button>
             ))}
 
             <div className="reveal-up panel-surface flex flex-1 flex-col justify-between p-6 sm:p-8" style={{ animationDelay: '0.34s' }}>
@@ -126,6 +140,16 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
           </a>
         </div>
       </div>
+
+      <GalleryPieceViewer
+        piece={selectedPiece}
+        open={Boolean(selectedPiece)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedPieceId(null);
+          }
+        }}
+      />
     </section>
   );
 }

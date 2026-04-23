@@ -7,6 +7,7 @@ import { createServer as createViteServer } from 'vite';
 import { connectToDatabase } from './db';
 import { getHeroContent, upsertHeroContent } from './hero-content-service';
 import { getGalleryContent, normalizeGalleryContent, upsertGalleryContent } from './gallery-content-service';
+import { render as renderApp } from '../src/entry-server';
 import { defaultGalleryContent, type GalleryContent, type GalleryPiece } from '../src/app/lib/gallery';
 import { defaultHeroContent, type HeroContent } from '../src/app/lib/heroContent';
 import { getAboutContent, upsertAboutContent } from './about-content-service';
@@ -43,6 +44,7 @@ app.use('/uploads', express.static(uploadsDir));
 
 const cachedHtmlByPath = new Map<string, string>();
 const activeSessions = new Map<string, { userId: string; expiresAt: number }>();
+const contactRequestsByIp = new Map<string, { count: number; windowStart: number }>();
 const pendingGoogleOAuthStates = new Map<string, {
   userId: string;
   expiresAt: number;
@@ -88,6 +90,25 @@ function respondHiddenNotFound(res: express.Response) {
 
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getContactRedirectUrl(status: 'success' | 'error' | 'rate-limit') {
+  return `/?contact=${status}#contact`;
+}
+
+function shouldUseSecureCookies(req: express.Request) {
+  const host = (req.get('host') ?? '').toLowerCase();
+  const forwardedProto = (req.get('x-forwarded-proto') ?? '').split(',')[0]?.trim().toLowerCase();
+  const isLocalHost =
+    host.startsWith('localhost') ||
+    host.startsWith('127.0.0.1') ||
+    host.startsWith('[::1]');
+
+  if (isLocalHost) {
+    return false;
+  }
+
+  return req.secure || forwardedProto === 'https';
 }
 
 function isMessageStatus(value: unknown): value is 'new' | 'seen' {
@@ -145,6 +166,8 @@ function parseGalleryPiecesJson(body: unknown): GalleryPiece[] {
             .map((item) => (typeof item === 'string' ? item.trim() : ''))
             .filter(Boolean)
         : [];
+      const coverImageUrl =
+        typeof rawPiece.coverImageUrl === 'string' ? rawPiece.coverImageUrl.trim() : '';
 
       if (!title || !material || !note || !category || !subcategory || imageUrls.length === 0) {
         return null;
@@ -154,6 +177,7 @@ function parseGalleryPiecesJson(body: unknown): GalleryPiece[] {
         src,
         alt: `${title} image ${index + 1}`,
       }));
+      const coverImage = images.find((image) => image.src === coverImageUrl) ?? images[0];
 
       const idSource =
         typeof rawPiece.id === 'string' && rawPiece.id.trim()
@@ -169,7 +193,7 @@ function parseGalleryPiecesJson(body: unknown): GalleryPiece[] {
         note,
         archiveCount: images.length,
         featured,
-        image: images[0],
+        image: coverImage,
         images,
       } as GalleryPiece;
     })
@@ -202,6 +226,37 @@ async function getAuthenticatedUser(req: express.Request) {
 
 const contactMessageRateLimit = createIpRateLimiter(10 * 60 * 1000, 5);
 const siteVisitTrackRateLimit = createIpRateLimiter(60 * 60 * 1000, 1);
+
+const contactRateLimitWindowMs = 10 * 60 * 1000;
+const contactRateLimitCleanupTimer = setInterval(() => {
+  const now = Date.now();
+
+  for (const [ipAddress, current] of contactRequestsByIp.entries()) {
+    if (now - current.windowStart >= contactRateLimitWindowMs) {
+      contactRequestsByIp.delete(ipAddress);
+    }
+  }
+}, Math.max(contactRateLimitWindowMs, 60000));
+contactRateLimitCleanupTimer.unref();
+
+function isContactSubmissionRateLimited(ipAddress: string, now: number) {
+  const windowMs = contactRateLimitWindowMs;
+  const maxRequests = 5;
+  const current = contactRequestsByIp.get(ipAddress);
+
+  if (!current || now - current.windowStart >= windowMs) {
+    contactRequestsByIp.set(ipAddress, { count: 1, windowStart: now });
+    return false;
+  }
+
+  if (current.count >= maxRequests) {
+    return true;
+  }
+
+  current.count += 1;
+  contactRequestsByIp.set(ipAddress, current);
+  return false;
+}
 
 app.get('/api/hero', async (_req, res, next) => {
   try {
@@ -303,6 +358,7 @@ app.get('/admin', async (req, res, next) => {
         material: piece.material,
         note: piece.note,
         featured: piece.featured === true,
+        coverImageUrl: piece.image.src,
         imageUrls: piece.images.map((image) => image.src),
       })),
       categories: gallery.categories,
@@ -339,17 +395,17 @@ app.get('/admin', async (req, res, next) => {
                   <td style="max-width:300px;">${message}</td>
                   <td>${createdAt}</td>
                   <td><span style="display:inline-block; padding:0.2rem 0.55rem; border-radius:999px; font-size:0.75rem; color:#fff; background:${statusColor};">${statusLabel}</span></td>
-                  <td>
-                    <form method="post" action="/admin/messages/${id}/status" style="display:inline-block; margin-right:0.4rem;">
+                  <td class="message-actions">
+                    <form method="post" action="/admin/messages/${id}/status">
                       <input type="hidden" name="status" value="${nextStatus}" />
                       <input type="hidden" name="q" value="${escapeHtml(searchQuery)}" />
                       <input type="hidden" name="messageStatus" value="${statusFilter}" />
-                      <button type="submit" style="background:#1f2937;">${nextStatusButton}</button>
+                      <button type="submit" class="button-dark">${nextStatusButton}</button>
                     </form>
-                    <form method="post" action="/admin/messages/${id}/delete" style="display:inline-block;" onsubmit="return confirm('Delete this contact message?');">
+                    <form method="post" action="/admin/messages/${id}/delete" onsubmit="return confirm('Delete this contact message?');">
                       <input type="hidden" name="q" value="${escapeHtml(searchQuery)}" />
                       <input type="hidden" name="messageStatus" value="${statusFilter}" />
-                      <button type="submit" style="background:#b91c1c;">Delete</button>
+                      <button type="submit" class="button-danger">Delete</button>
                     </form>
                   </td>
                 </tr>`;
@@ -365,27 +421,36 @@ app.get('/admin', async (req, res, next) => {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&display=swap"
+    />
     <style>
       :root {
         color-scheme: light;
-        --admin-bg: #f6f1e9;
-        --admin-surface: rgba(255, 252, 247, 0.9);
-        --admin-card: #fffaf3;
-        --admin-border: rgba(88, 72, 58, 0.12);
-        --admin-border-strong: rgba(88, 72, 58, 0.18);
-        --admin-text: #312a24;
-        --admin-muted: #776a5e;
-        --admin-accent: #9a6a53;
-        --admin-accent-dark: #4b3d34;
-        --admin-shadow: 0 18px 55px rgba(52, 42, 33, 0.12);
+        --admin-bg: #faf8f5;
+        --admin-surface: rgba(255, 252, 247, 0.88);
+        --admin-card: rgba(255, 255, 255, 0.88);
+        --admin-border: rgba(45, 41, 38, 0.1);
+        --admin-border-strong: rgba(45, 41, 38, 0.18);
+        --admin-text: #2d2926;
+        --admin-muted: #6b635a;
+        --admin-accent: #8b8070;
+        --admin-accent-dark: #2d2926;
+        --admin-shadow: 0 24px 70px rgba(45, 41, 38, 0.08);
+        --admin-serif: "Cormorant Garamond", serif;
+        --admin-sans: "Manrope", sans-serif;
       }
       * { box-sizing: border-box; }
       body {
-        font-family: "Inter", "Segoe UI", sans-serif;
+        font-family: var(--admin-sans);
         margin: 0;
         background:
-          radial-gradient(circle at top, rgba(177, 141, 111, 0.18), transparent 36%),
-          linear-gradient(180deg, #f7f1ea 0%, #f2ebe3 100%);
+          radial-gradient(circle at top, rgba(168, 153, 110, 0.18), transparent 34rem),
+          linear-gradient(180deg, rgba(255,255,255,0.42), rgba(255,255,255,0)),
+          var(--admin-bg);
         color: var(--admin-text);
       }
       main {
@@ -393,24 +458,25 @@ app.get('/admin', async (req, res, next) => {
         margin: 2rem auto;
         background: var(--admin-surface);
         border: 1px solid var(--admin-border);
-        border-radius: 28px;
+        border-radius: 0;
         padding: 1.75rem;
         box-shadow: var(--admin-shadow);
         backdrop-filter: blur(18px);
       }
       section {
         border: 1px solid var(--admin-border);
-        border-radius: 22px;
+        border-radius: 0;
         padding: 1.2rem;
         background: var(--admin-card);
         margin-top: 1rem;
         box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
       }
       h1, h2, h3, summary strong {
-        font-family: "Georgia", "Times New Roman", serif;
+        font-family: var(--admin-serif);
         letter-spacing: -0.02em;
       }
-      h2 { margin-top: 0; font-size: 1.45rem; }
+      h1 { font-weight: 500; }
+      h2 { margin-top: 0; font-size: 1.65rem; font-weight: 500; }
       h3 { color: var(--admin-accent-dark); }
       form p { margin: 0.75rem 0; }
       label { display: block; font-size: 0.92rem; color: var(--admin-muted); }
@@ -418,7 +484,7 @@ app.get('/admin', async (req, res, next) => {
         width: 100%;
         margin-top: 0.35rem;
         border: 1px solid var(--admin-border-strong);
-        border-radius: 14px;
+        border-radius: 0;
         padding: 0.72rem 0.85rem;
         font: inherit;
         background: rgba(255, 255, 255, 0.9);
@@ -430,16 +496,18 @@ app.get('/admin', async (req, res, next) => {
         border-color: rgba(154, 106, 83, 0.42);
       }
       button {
-        border: none;
+        border: 1px solid var(--admin-accent-dark);
         background: var(--admin-accent-dark);
         color: #fff;
-        border-radius: 999px;
+        border-radius: 0;
         padding: 0.72rem 1.15rem;
         cursor: pointer;
         font-weight: 600;
-        letter-spacing: 0.01em;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 0.78rem;
       }
-      button:hover { opacity: 0.94; }
+      button:hover { background: var(--admin-accent); border-color: var(--admin-accent); opacity: 1; }
       .upload-row { display: grid; grid-template-columns: 1fr auto; gap: 0.55rem; align-items: end; }
       .upload-help { margin-top: -0.3rem; color: var(--admin-muted); font-size: 0.82rem; line-height: 1.6; }
       .uploads-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0.65rem; }
@@ -448,31 +516,101 @@ app.get('/admin', async (req, res, next) => {
       .upload-card a { display: block; margin-top: 0.45rem; color: var(--admin-accent-dark); font-size: 0.8rem; word-break: break-all; text-decoration: none; }
       .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
       .stat-card { border: 1px solid var(--admin-border); border-radius: 18px; padding: 1rem; background: rgba(255,255,255,0.78); }
-      .status-message { padding: 0.85rem 1rem; border-radius: 16px; background: #f3f9f5; color: #17603c; border: 1px solid rgba(23,96,60,0.16); }
+      .status-message { padding: 0.85rem 1rem; border-radius: 0; background: #f3f9f5; color: #17603c; border: 1px solid rgba(23,96,60,0.16); }
       .tab-row { display: flex; gap: 0.55rem; margin-bottom: 1rem; flex-wrap: wrap; }
       .tab-link {
         display: inline-flex;
         align-items: center;
         text-decoration: none;
         border: 1px solid var(--admin-border-strong);
-        border-radius: 999px;
+        border-radius: 0;
         padding: 0.58rem 0.92rem;
         color: var(--admin-muted);
         background: rgba(255,255,255,0.72);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        font-size: 0.76rem;
       }
       .tab-link.active { background: var(--admin-accent-dark); border-color: var(--admin-accent-dark); color: #fff; }
       .messages-toolbar { display: grid; grid-template-columns: 1fr auto auto; gap: 0.65rem; align-items: end; }
       .messages-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 16px; overflow: hidden; }
       .messages-table th, .messages-table td { border: 1px solid var(--admin-border); padding: 0.65rem; vertical-align: top; text-align: left; font-size: 0.86rem; }
-      .messages-table th { background: #f7efe4; font-weight: 700; }
+      .messages-table th {
+        background: #f7efe4;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        font-size: 0.72rem;
+        color: var(--admin-muted);
+      }
       .admin-hero { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 1rem; margin-bottom: 1.4rem; }
-      .admin-eyebrow { margin: 0 0 0.35rem 0; font-size: 0.78rem; letter-spacing: 0.32em; text-transform: uppercase; color: var(--admin-muted); }
+      .admin-eyebrow { margin: 0 0 0.35rem 0; font-size: 0.76rem; letter-spacing: 0.32em; text-transform: uppercase; color: var(--admin-muted); }
       .admin-intro { max-width: 40rem; color: var(--admin-muted); line-height: 1.8; }
+      .admin-shell-note {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.55rem 0.85rem;
+        border: 1px solid var(--admin-border);
+        background: rgba(255,255,255,0.74);
+        color: var(--admin-muted);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 0.76rem;
+      }
+      .section-intro {
+        margin: 0 0 1rem 0;
+        color: var(--admin-muted);
+        line-height: 1.75;
+        max-width: 44rem;
+      }
+      section > h2 {
+        margin-bottom: 0.35rem;
+        font-size: 1.7rem;
+      }
+      section > form,
+      section > .table-wrap,
+      section > .upload-library-toolbar,
+      section > .uploads-list {
+        margin-top: 0.9rem;
+      }
+      label {
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 0.74rem;
+      }
+      input::placeholder,
+      textarea::placeholder {
+        color: rgba(107, 99, 90, 0.72);
+      }
+      .stat-card strong {
+        display: block;
+        margin-bottom: 0.4rem;
+        color: var(--admin-muted);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        font-size: 0.72rem;
+      }
       .section-grid { display: grid; gap: 1rem; }
       .section-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .gallery-category-grid { display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
       .gallery-category-card { border: 1px solid var(--admin-border); border-radius: 18px; padding: 1rem; background: rgba(255,255,255,0.74); }
       .gallery-editor-toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between; margin: 1rem 0; }
+      .gallery-toolbar-main { display: grid; gap: 0.8rem; flex: 1 1 34rem; }
+      .gallery-toolbar-filters { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+      .toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.55rem; }
+      .count-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.62rem 0.85rem;
+        border-radius: 999px;
+        border: 1px solid var(--admin-border);
+        background: rgba(255,255,255,0.74);
+        color: var(--admin-muted);
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
       .gallery-piece-editor { display: grid; gap: 0.9rem; }
       .gallery-piece-card { border: 1px solid var(--admin-border); border-radius: 18px; background: rgba(255,255,255,0.76); overflow: hidden; }
       .gallery-piece-card summary { list-style: none; cursor: pointer; padding: 1rem 1.1rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
@@ -481,14 +619,101 @@ app.get('/admin', async (req, res, next) => {
       .gallery-piece-body { border-top: 1px solid var(--admin-border); padding: 1rem 1.1rem 1.2rem; }
       .piece-grid { display: grid; gap: 0.85rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .piece-grid .full { grid-column: 1 / -1; }
+      .gallery-piece-preview-strip { display: grid; gap: 0.55rem; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); }
+      .gallery-piece-preview {
+        border: 1px solid var(--admin-border);
+        border-radius: 14px;
+        overflow: hidden;
+        background: rgba(255,255,255,0.9);
+      }
+      .gallery-piece-preview.is-cover {
+        border-color: var(--admin-accent-dark);
+        box-shadow: 0 0 0 1px rgba(45, 41, 38, 0.16);
+      }
+      .gallery-piece-preview img { display: block; width: 100%; height: 92px; object-fit: cover; background: #f3f4f6; }
+      .gallery-piece-preview-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        border-top: 1px solid var(--admin-border);
+        padding: 0.55rem 0.7rem;
+      }
+      .gallery-piece-preview-label {
+        color: var(--admin-muted);
+        font-size: 0.68rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+      }
+      .gallery-piece-preview-button {
+        padding: 0.45rem 0.7rem;
+        font-size: 0.68rem;
+        letter-spacing: 0.16em;
+      }
+      .gallery-piece-preview-count,
+      .gallery-piece-preview-empty {
+        border: 1px dashed var(--admin-border-strong);
+        border-radius: 14px;
+        padding: 1rem;
+        color: var(--admin-muted);
+        font-size: 0.8rem;
+        text-align: center;
+        background: rgba(255,255,255,0.55);
+      }
       .checkbox-row { display: flex; align-items: center; gap: 0.55rem; color: var(--admin-text); }
       .checkbox-row input { width: auto; margin: 0; }
       .ghost-button { background: rgba(255,255,255,0.88); color: var(--admin-accent-dark); border: 1px solid var(--admin-border-strong); }
       .danger-button { background: #b0423d; }
+      .empty-editor-state {
+        border: 1px dashed var(--admin-border-strong);
+        border-radius: 18px;
+        padding: 1rem 1.1rem;
+        color: var(--admin-muted);
+        background: rgba(255,255,255,0.6);
+      }
+      .upload-library-toolbar { display: grid; gap: 0.75rem; grid-template-columns: minmax(0, 1fr) auto; align-items: end; margin-bottom: 0.9rem; }
+      .upload-card-actions { display: flex; gap: 0.45rem; margin-top: 0.55rem; }
+      .upload-card-actions button { flex: 1; padding: 0.58rem 0.8rem; font-size: 0.78rem; }
+      .admin-divider { margin: 1.25rem 0; border: none; border-top: 1px solid var(--admin-border); }
+      .button-dark { background: #1f2937; }
+      .button-danger { background: #b91c1c; }
+      .inline-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.32rem 0.7rem;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        border: 1px solid var(--admin-border);
+        background: rgba(255,255,255,0.75);
+        color: var(--admin-muted);
+      }
+      .inline-badge.success {
+        border-color: rgba(22,101,52,0.15);
+        background: #eff8f1;
+        color: #166534;
+      }
+      .oauth-card {
+        margin-bottom: 1rem;
+        border: 1px solid var(--admin-border);
+        border-radius: 18px;
+        padding: 1rem;
+        background: rgba(255,255,255,0.88);
+      }
+      .oauth-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.65rem; }
+      .oauth-actions { margin: 0.9rem 0 0 0; display: flex; gap: 0.55rem; flex-wrap: wrap; align-items: center; }
+      .table-wrap {
+        overflow: auto;
+        margin-top: 1rem;
+        border: 1px solid var(--admin-border);
+        border-radius: 18px;
+        background: rgba(255,255,255,0.76);
+      }
+      .message-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+      .message-actions form { margin: 0; }
       .subtle-divider { margin: 1.25rem 0; border: none; border-top: 1px solid var(--admin-border); }
       @media (max-width: 900px) {
         main { margin: 1rem; padding: 1rem; border-radius: 22px; }
-        .section-grid.two, .piece-grid, .messages-toolbar { grid-template-columns: 1fr; }
+        .section-grid.two, .piece-grid, .messages-toolbar, .upload-library-toolbar { grid-template-columns: 1fr; }
         .upload-row { grid-template-columns: 1fr; }
       }
     </style>
@@ -501,7 +726,10 @@ app.get('/admin', async (req, res, next) => {
           <h1 style="margin: 0;">Studio Dashboard</h1>
           <p class="admin-intro">Manage the public-facing story, gallery archive, and incoming messages from one place without changing the site’s underlying functionality.</p>
         </div>
-        <p style="margin: 0; color: var(--admin-muted);">Signed in as <strong>${safeUserName}</strong></p>
+        <div style="display:grid; gap:0.6rem; justify-items:end;">
+          <span class="admin-shell-note">Bespoke Content Editor</span>
+          <p style="margin: 0; color: var(--admin-muted);">Signed in as <strong>${safeUserName}</strong></p>
+        </div>
       </div>
       <nav class="tab-row">
         <a class="tab-link ${activeTab === 'content' ? 'active' : ''}" href="/admin?tab=content">Content</a>
@@ -520,6 +748,7 @@ app.get('/admin', async (req, res, next) => {
       </section>
       <section>
         <h2>Hero Content</h2>
+        <p class="section-intro">Shape the first impression of the site with the opening lines, call to action, and full-bleed hero image.</p>
         <form method="post" action="/admin/content/hero">
           <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(hero.eyebrow)}" /></label></p>
           <p><label>Heading Line 1<br /><input name="headingLine1" required style="width:100%;" value="${escapeHtml(hero.headingLine1)}" /></label></p>
@@ -534,9 +763,10 @@ app.get('/admin', async (req, res, next) => {
           <p><button type="submit">Save Hero</button></p>
         </form>
       </section>
-      <hr style="margin: 1.25rem 0; border: none; border-top: 1px solid #e5e7eb;" />
+      <hr class="admin-divider" />
       <section>
         <h2>About Content</h2>
+        <p class="section-intro">Refine the studio story, process notes, and portrait image without touching the layout itself.</p>
         <form method="post" action="/admin/content/about">
           <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(about.eyebrow)}" /></label></p>
           <p><label>Heading<br /><input name="heading" required style="width:100%;" value="${escapeHtml(about.heading)}" /></label></p>
@@ -553,9 +783,10 @@ app.get('/admin', async (req, res, next) => {
           <p><button type="submit">Save About</button></p>
         </form>
       </section>
-      <hr style="margin: 1.25rem 0; border: none; border-top: 1px solid #e5e7eb;" />
+      <hr class="admin-divider" />
       <section>
         <h2>Contact Content</h2>
+        <p class="section-intro">Control the language, labels, and direct contact links that shape the inquiry experience on the public site.</p>
         <form method="post" action="/admin/content/contact">
           <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(contact.eyebrow)}" /></label></p>
           <p><label>Heading<br /><input name="heading" required style="width:100%;" value="${escapeHtml(contact.heading)}" /></label></p>
@@ -577,6 +808,7 @@ app.get('/admin', async (req, res, next) => {
       </section>
       <section>
         <h2>Craftsmanship Content</h2>
+        <p class="section-intro">Update the supporting craftsmanship section that frames the studio’s approach without turning it commercial.</p>
         <form method="post" action="/admin/content/craftsmanship">
           <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(craftsmanship.eyebrow)}" /></label></p>
           <p><label>Heading<br /><input name="heading" required style="width:100%;" value="${escapeHtml(craftsmanship.heading)}" /></label></p>
@@ -587,13 +819,18 @@ app.get('/admin', async (req, res, next) => {
       </section>
       <section>
         <h2>Image Library</h2>
-        <p class="upload-help" id="upload-status">Upload images from Hero/About forms above. Reuse URLs here later in Featured Work.</p>
+        <p class="section-intro">Browse uploaded assets, copy their live URLs, and reuse them across hero, about, contact, and gallery content.</p>
+        <div class="upload-library-toolbar">
+          <p style="margin:0;"><label>Search Archive<br /><input type="search" id="uploads-search" placeholder="Filename, folder, or URL" /></label></p>
+          <p class="upload-help" style="margin:0;">Upload images from the content forms above, then reuse those URLs anywhere across the website.</p>
+        </div>
+        <p class="upload-help" id="upload-status">Upload images from Hero/About forms above. Reuse URLs here later across the homepage and gallery.</p>
         <div id="uploads-list" class="uploads-list"></div>
       </section>
       <section>
         <h2>Reset</h2>
         <form method="post" action="/admin/content/reset" onsubmit="return confirm('Reset all website content to defaults?');">
-          <button type="submit" style="background: #b91c1c; color: #fff; border: none; padding: 0.55rem 0.85rem; border-radius: 6px;">Reset all content</button>
+          <button type="submit" class="button-danger">Reset all content</button>
         </form>
       </section>
       ` : ''}
@@ -601,7 +838,7 @@ app.get('/admin', async (req, res, next) => {
       <section>
         <p class="admin-eyebrow" style="margin-top:0;">Gallery</p>
         <h2>Gallery Editor</h2>
-        <p class="upload-help">Edit the homepage portfolio preview, the dedicated gallery page, and each archived piece from one form. Images are saved as live URLs, so the public site updates without code changes.</p>
+        <p class="section-intro">Edit the homepage portfolio preview, the dedicated gallery page, and each archived piece from one form. Images are saved as live URLs, so the public site updates without code changes.</p>
         <form id="gallery-content-form" method="post" action="/admin/content/gallery">
           <div class="section-grid two">
             <p><label>Homepage Eyebrow<br /><input name="previewEyebrow" required value="${escapeHtml(gallery.previewEyebrow)}" /></label></p>
@@ -625,11 +862,29 @@ app.get('/admin', async (req, res, next) => {
           </div>
 
           <div class="gallery-editor-toolbar">
-            <div>
-              <strong style="display:block; margin-bottom:0.2rem;">Piece Archive</strong>
-              <span class="upload-help">Collapse the cards you are not editing. Each piece accepts one image URL per line.</span>
+            <div class="gallery-toolbar-main">
+              <div>
+                <strong style="display:block; margin-bottom:0.2rem;">Piece Archive</strong>
+                <span class="upload-help">Search, filter, and edit the archive without losing the existing gallery structure. Each piece still accepts one image URL per line.</span>
+              </div>
+              <div class="gallery-toolbar-filters">
+                <p style="margin:0;"><label>Search Pieces<br /><input type="search" id="gallery-piece-search" placeholder="Title, material, note, room" /></label></p>
+                <p style="margin:0;"><label>Room Filter<br />
+                  <select id="gallery-piece-category-filter">
+                    <option value="all">All rooms</option>
+                    ${gallery.categories
+                      .map((category) => `<option value="${escapeHtml(category.name)}">${escapeHtml(category.name)}</option>`)
+                      .join('')}
+                  </select>
+                </label></p>
+              </div>
             </div>
-            <button type="button" id="gallery-add-piece" class="ghost-button">Add Piece</button>
+            <div class="toolbar-actions">
+              <span id="gallery-piece-count" class="count-chip">${gallery.pieces.length} pieces</span>
+              <button type="button" id="gallery-expand-all" class="ghost-button">Expand</button>
+              <button type="button" id="gallery-collapse-all" class="ghost-button">Collapse</button>
+              <button type="button" id="gallery-add-piece" class="ghost-button">Add Piece</button>
+            </div>
           </div>
 
           <textarea id="gallery-pieces-json" name="galleryPiecesJson" hidden></textarea>
@@ -640,6 +895,11 @@ app.get('/admin', async (req, res, next) => {
       </section>
       <section>
         <h2>Image Library</h2>
+        <p class="section-intro">Select an Image URLs field in a piece, then copy or insert assets from the archive directly into that item.</p>
+        <div class="upload-library-toolbar">
+          <p style="margin:0;"><label>Search Archive<br /><input type="search" id="uploads-search" placeholder="Filename, folder, or URL" /></label></p>
+          <p class="upload-help" style="margin:0;">Select an Image URLs field in a piece, then use Insert to append a URL.</p>
+        </div>
         <p class="upload-help" id="upload-status">Upload a new image or reuse an existing URL from the archive below when editing a gallery piece.</p>
         <div id="uploads-list" class="uploads-list"></div>
       </section>
@@ -647,28 +907,29 @@ app.get('/admin', async (req, res, next) => {
       ${activeTab === 'messages' ? `
       <section>
         <h2>Contact Messages</h2>
-        <form method="post" action="/admin/email/google/connect" style="margin-bottom:1rem; border:1px solid #e5e7eb; border-radius:10px; padding:0.9rem; background:#fff;">
+        <p class="section-intro">Review inquiries, search the archive, and keep forwarding settings aligned with the live contact flow.</p>
+        <form method="post" action="/admin/email/google/connect" class="oauth-card">
           <h3 style="margin-top:0; margin-bottom:0.7rem; font-size:0.98rem;">Auto-forward using Gmail OAuth</h3>
           <p class="upload-help" style="margin-top:0; margin-bottom:0.8rem;">Connect a Gmail account once, then contact messages are auto-forwarded without server SMTP config changes.</p>
-          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:0.65rem;">
+          <div class="oauth-grid">
             <p style="margin:0;"><label>Forward To Email<br /><input name="forwardToEmail" required value="${escapeHtml(forwardingSettings.forwardToEmail)}" placeholder="inbox@example.com" /></label></p>
             <p style="margin:0;"><label>Gmail Address<br /><input name="gmailAddress" required value="${escapeHtml(forwardingSettings.gmailAddress)}" placeholder="your@gmail.com" /></label></p>
             <p style="margin:0;"><label>Google OAuth Client ID<br /><input name="googleClientId" required value="${escapeHtml(forwardingSettings.googleClientId)}" placeholder="...apps.googleusercontent.com" /></label></p>
             <p style="margin:0;"><label>Google OAuth Client Secret<br /><input name="googleClientSecret" required value="${escapeHtml(forwardingSettings.googleClientSecret)}" placeholder="GOCSPX-..." /></label></p>
           </div>
-          <p style="margin:0.8rem 0 0 0; display:flex; gap:0.55rem; flex-wrap:wrap; align-items:center;">
-            <button type="submit" style="background:#111827;">${forwardingSettings.connected ? 'Reconnect Gmail' : 'Connect Gmail'}</button>
-            <span style="font-size:0.84rem; color:${forwardingSettings.connected ? '#166534' : '#6b7280'};">${forwardingSettings.connected ? 'Connected' : 'Not connected'}</span>
+          <p class="oauth-actions">
+            <button type="submit" class="button-dark">${forwardingSettings.connected ? 'Reconnect Gmail' : 'Connect Gmail'}</button>
+            <span class="inline-badge ${forwardingSettings.connected ? 'success' : ''}">${forwardingSettings.connected ? 'Connected' : 'Not connected'}</span>
           </p>
         </form>
         <form method="post" action="/admin/email/google/disconnect" style="margin-bottom:1rem;">
-          <button type="submit" style="background:#b91c1c;" ${forwardingSettings.connected ? '' : 'disabled'}>Disconnect Gmail Forwarding</button>
+          <button type="submit" class="button-danger" ${forwardingSettings.connected ? '' : 'disabled'}>Disconnect Gmail Forwarding</button>
         </form>
         <form method="get" action="/admin" class="messages-toolbar">
           <input type="hidden" name="tab" value="messages" />
           <p style="margin:0;"><label>Search<br /><input type="search" name="q" value="${escapeHtml(searchQuery)}" placeholder="Name, email, phone, project, message" /></label></p>
           <p style="margin:0;"><label>Status<br />
-            <select name="messageStatus" style="margin-top:0.35rem; border:1px solid #d1d5db; border-radius:8px; padding:0.62rem 0.75rem; background:#fff;">
+            <select name="messageStatus">
               <option value="all" ${statusFilter === 'all' ? 'selected' : ''}>All</option>
               <option value="new" ${statusFilter === 'new' ? 'selected' : ''}>New</option>
               <option value="seen" ${statusFilter === 'seen' ? 'selected' : ''}>Seen</option>
@@ -676,7 +937,7 @@ app.get('/admin', async (req, res, next) => {
           </label></p>
           <p style="margin:0;"><button type="submit">Search</button></p>
         </form>
-        <div style="overflow:auto; margin-top:1rem;">
+        <div class="table-wrap">
           <table class="messages-table">
             <thead>
               <tr>
@@ -700,14 +961,25 @@ app.get('/admin', async (req, res, next) => {
       (function () {
         const statusEl = document.getElementById('upload-status');
         const uploadsListEl = document.getElementById('uploads-list');
+        const uploadsSearchInput = document.getElementById('uploads-search');
         const galleryEditorData = ${serializeForScript(galleryEditorState)};
         const galleryEditorEl = document.getElementById('gallery-piece-editor');
         const galleryAddPieceButton = document.getElementById('gallery-add-piece');
+        const galleryExpandAllButton = document.getElementById('gallery-expand-all');
+        const galleryCollapseAllButton = document.getElementById('gallery-collapse-all');
+        const galleryPieceSearchInput = document.getElementById('gallery-piece-search');
+        const galleryPieceCategoryFilter = document.getElementById('gallery-piece-category-filter');
+        const galleryPieceCountEl = document.getElementById('gallery-piece-count');
         const galleryForm = document.getElementById('gallery-content-form');
         const galleryPiecesJsonField = document.getElementById('gallery-pieces-json');
         const galleryCategories = Array.isArray(galleryEditorData && galleryEditorData.categories)
           ? galleryEditorData.categories
           : [];
+        let galleryPiecesState = Array.isArray(galleryEditorData && galleryEditorData.pieces)
+          ? galleryEditorData.pieces.map(normalizeEditorPiece)
+          : [];
+        let cachedUploads = [];
+        let lastFocusedImageUrlsField = null;
 
         function escapeHtmlValue(value) {
           return String(value || '')
@@ -758,6 +1030,14 @@ app.get('/admin', async (req, res, next) => {
           const imageUrls = Array.isArray(piece && piece.imageUrls)
             ? piece.imageUrls.map(function (url) { return String(url || '').trim(); }).filter(Boolean)
             : [];
+          const requestedCoverImageUrl =
+            piece && typeof piece.coverImageUrl === 'string'
+              ? piece.coverImageUrl.trim()
+              : '';
+          const coverImageUrl =
+            imageUrls.includes(requestedCoverImageUrl)
+              ? requestedCoverImageUrl
+              : (imageUrls[0] || '');
 
           return {
             id: typeof (piece && piece.id) === 'string' ? piece.id.trim() : '',
@@ -770,8 +1050,78 @@ app.get('/admin', async (req, res, next) => {
             material: typeof (piece && piece.material) === 'string' ? piece.material.trim() : '',
             note: typeof (piece && piece.note) === 'string' ? piece.note.trim() : '',
             featured: piece && piece.featured === true,
+            coverImageUrl: coverImageUrl,
             imageUrls: imageUrls,
           };
+        }
+
+        function isMeaningfulPiece(piece) {
+          return Boolean(piece && (piece.title || piece.material || piece.note || (Array.isArray(piece.imageUrls) && piece.imageUrls.length > 0)));
+        }
+
+        function getGalleryFilterState() {
+          const searchValue =
+            galleryPieceSearchInput && typeof galleryPieceSearchInput.value === 'string'
+              ? galleryPieceSearchInput.value.trim().toLowerCase()
+              : '';
+          const categoryValue =
+            galleryPieceCategoryFilter && typeof galleryPieceCategoryFilter.value === 'string'
+              ? galleryPieceCategoryFilter.value
+              : 'all';
+
+          return {
+            searchValue: searchValue,
+            categoryValue: categoryValue,
+          };
+        }
+
+        function pieceMatchesFilters(piece, filters) {
+          if (filters.categoryValue && filters.categoryValue !== 'all' && piece.category !== filters.categoryValue) {
+            return false;
+          }
+
+          if (!filters.searchValue) {
+            return true;
+          }
+
+          const haystack = [
+            piece.title,
+            piece.material,
+            piece.note,
+            piece.category,
+            piece.subcategory,
+          ]
+            .join(' ')
+            .toLowerCase();
+
+          return haystack.includes(filters.searchValue);
+        }
+
+        function buildPiecePreviewMarkup(imageUrls, coverImageUrl) {
+          if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
+            return '<div class="gallery-piece-preview-empty">No images linked yet.</div>';
+          }
+
+          const previewCards = imageUrls
+            .slice(0, 6)
+            .map(function (url, index) {
+              const safeUrl = escapeHtmlValue(url);
+              const isCover = url === coverImageUrl;
+              return '<div class="gallery-piece-preview' + (isCover ? ' is-cover' : '') + '">' +
+                '<img src="' + safeUrl + '" alt="Preview image ' + (index + 1) + '" loading="lazy" />' +
+                '<div class="gallery-piece-preview-actions">' +
+                  '<span class="gallery-piece-preview-label">' + (isCover ? 'Cover frame' : 'Frame ' + (index + 1)) + '</span>' +
+                  '<button type="button" class="ghost-button gallery-piece-preview-button" data-set-cover="' + safeUrl + '">' + (isCover ? 'Selected' : 'Use as cover') + '</button>' +
+                '</div>' +
+              '</div>';
+            })
+            .join('');
+
+          const overflowBadge = imageUrls.length > 6
+            ? '<div class="gallery-piece-preview-count">+' + (imageUrls.length - 6) + ' more image' + (imageUrls.length - 6 === 1 ? '' : 's') + '</div>'
+            : '';
+
+          return previewCards + overflowBadge;
         }
 
         function readPiecesFromDom() {
@@ -779,12 +1129,14 @@ app.get('/admin', async (req, res, next) => {
 
           return Array.from(galleryEditorEl.querySelectorAll('[data-piece-card]'))
             .map(function (card) {
+              const pieceIndex = Number(card.getAttribute('data-piece-index'));
               const title = card.querySelector('[data-field="title"]');
               const category = card.querySelector('[data-field="category"]');
               const subcategory = card.querySelector('[data-field="subcategory"]');
               const material = card.querySelector('[data-field="material"]');
               const note = card.querySelector('[data-field="note"]');
               const featured = card.querySelector('[data-field="featured"]');
+              const coverImageUrl = card.querySelector('[data-field="coverImageUrl"]');
               const imageUrls = card.querySelector('[data-field="imageUrls"]');
               const idInput = card.querySelector('[data-field="id"]');
 
@@ -796,6 +1148,10 @@ app.get('/admin', async (req, res, next) => {
                 material: material && typeof material.value === 'string' ? material.value.trim() : '',
                 note: note && typeof note.value === 'string' ? note.value.trim() : '',
                 featured: Boolean(featured && featured.checked),
+                coverImageUrl:
+                  coverImageUrl && typeof coverImageUrl.value === 'string'
+                    ? coverImageUrl.value.trim()
+                    : '',
                 imageUrls:
                   imageUrls && typeof imageUrls.value === 'string'
                     ? imageUrls.value.split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean)
@@ -803,39 +1159,82 @@ app.get('/admin', async (req, res, next) => {
               });
 
               normalized.id = normalized.id || slugifyPieceId(normalized.title);
-              return normalized;
+              return {
+                pieceIndex: pieceIndex,
+                piece: normalized,
+              };
             })
-            .filter(function (piece) {
-              return piece.title || piece.material || piece.note || piece.imageUrls.length > 0;
+            .filter(function (entry) {
+              return Number.isInteger(entry.pieceIndex) && entry.pieceIndex >= 0;
             });
         }
 
-        function renderGalleryEditor(pieces) {
+        function syncVisiblePiecesIntoState() {
+          readPiecesFromDom().forEach(function (entry) {
+            galleryPiecesState[entry.pieceIndex] = entry.piece;
+          });
+        }
+
+        function updateGalleryPieceCount(visibleCount) {
+          if (!galleryPieceCountEl) {
+            return;
+          }
+
+          const totalCount = galleryPiecesState.length;
+          galleryPieceCountEl.textContent =
+            visibleCount === totalCount
+              ? totalCount + ' piece' + (totalCount === 1 ? '' : 's')
+              : visibleCount + ' of ' + totalCount + ' pieces';
+        }
+
+        function renderGalleryEditor() {
           if (!galleryEditorEl) return;
 
-          galleryEditorEl.innerHTML = pieces
-            .map(function (piece, index) {
-              const normalized = normalizeEditorPiece(piece);
+          const filters = getGalleryFilterState();
+          const visiblePieces = galleryPiecesState
+            .map(function (piece, pieceIndex) {
+              return {
+                pieceIndex: pieceIndex,
+                piece: normalizeEditorPiece(piece),
+              };
+            })
+            .filter(function (entry) {
+              return pieceMatchesFilters(entry.piece, filters);
+            });
+
+          updateGalleryPieceCount(visiblePieces.length);
+
+          if (visiblePieces.length === 0) {
+            galleryEditorEl.innerHTML = '<div class="empty-editor-state">No pieces match the current search or room filter.</div>';
+            return;
+          }
+
+          galleryEditorEl.innerHTML = visiblePieces
+            .map(function (entry, visibleIndex) {
+              const normalized = normalizeEditorPiece(entry.piece);
               const imageCount = normalized.imageUrls.length;
               const summaryTitle = normalized.title || 'Untitled piece';
               const summaryMeta = normalized.category + ' / ' + normalized.subcategory + ' / ' + imageCount + ' image' + (imageCount === 1 ? '' : 's');
+              const previewMarkup = buildPiecePreviewMarkup(normalized.imageUrls, normalized.coverImageUrl);
 
-              return '<details class="gallery-piece-card" data-piece-card open="' + (index < 2 ? 'open' : '') + '">' +
+              return '<details class="gallery-piece-card" data-piece-card data-piece-index="' + entry.pieceIndex + '" ' + (visibleIndex < 1 ? 'open' : '') + '>' +
                 '<summary>' +
                   '<div>' +
                     '<strong>' + escapeHtmlValue(summaryTitle) + '</strong>' +
                     '<div class="gallery-piece-meta">' + escapeHtmlValue(summaryMeta) + (normalized.featured ? ' / featured' : '') + '</div>' +
                   '</div>' +
-                  '<button type="button" class="danger-button" data-remove-piece="' + index + '">Remove</button>' +
+                  '<button type="button" class="danger-button" data-remove-piece="' + entry.pieceIndex + '">Remove</button>' +
                 '</summary>' +
                 '<div class="gallery-piece-body">' +
                   '<div class="piece-grid">' +
                     '<input type="hidden" data-field="id" value="' + escapeHtmlValue(normalized.id) + '" />' +
+                    '<input type="hidden" data-field="coverImageUrl" value="' + escapeHtmlValue(normalized.coverImageUrl) + '" />' +
                     '<p><label>Title<br /><input data-field="title" value="' + escapeHtmlValue(normalized.title) + '" /></label></p>' +
                     '<p><label>Material<br /><input data-field="material" value="' + escapeHtmlValue(normalized.material) + '" /></label></p>' +
                     '<p><label>Category<br /><select data-field="category">' + categoryOptionsMarkup(normalized.category) + '</select></label></p>' +
                     '<p><label>Subcategory<br /><select data-field="subcategory">' + getSubcategoryOptions(normalized.category, normalized.subcategory) + '</select></label></p>' +
                     '<p class="full"><label>Note<br /><textarea data-field="note" style="min-height:120px;">' + escapeHtmlValue(normalized.note) + '</textarea></label></p>' +
+                    '<div class="full"><label>Cover Image</label><p class="upload-help" style="margin:0 0 0.75rem 0;">Choose which frame leads on the homepage, room cards, and archive viewer entry point.</p><div class="gallery-piece-preview-strip">' + previewMarkup + '</div></div>' +
                     '<p class="full"><label>Image URLs (one per line)<br /><textarea data-field="imageUrls" style="min-height:150px;">' + escapeHtmlValue(normalized.imageUrls.join('\\n')) + '</textarea></label></p>' +
                     '<p class="full"><label class="checkbox-row"><input type="checkbox" data-field="featured" ' + (normalized.featured ? 'checked' : '') + ' /> Featured on homepage portfolio section</label></p>' +
                   '</div>' +
@@ -843,12 +1242,55 @@ app.get('/admin', async (req, res, next) => {
               '</details>';
             })
             .join('');
+
+          lastFocusedImageUrlsField = null;
         }
 
         function setStatus(message, isError) {
           if (!statusEl) return;
           statusEl.textContent = message;
           statusEl.style.color = isError ? '#b91c1c' : '#6b7280';
+        }
+
+        function renderUploads() {
+          if (!uploadsListEl) return;
+
+          const searchTerm =
+            uploadsSearchInput && typeof uploadsSearchInput.value === 'string'
+              ? uploadsSearchInput.value.trim().toLowerCase()
+              : '';
+
+          const visibleUploads = cachedUploads
+            .filter(function (item) {
+              if (!searchTerm) {
+                return true;
+              }
+
+              const url = item && typeof item.url === 'string' ? item.url.toLowerCase() : '';
+              return url.includes(searchTerm);
+            })
+            .slice(0, 80);
+
+          if (visibleUploads.length === 0) {
+            uploadsListEl.innerHTML = searchTerm
+              ? '<p class="upload-help">No uploaded images match that search.</p>'
+              : '<p class="upload-help">No images uploaded yet.</p>';
+            return;
+          }
+
+          uploadsListEl.innerHTML = visibleUploads
+            .map(function (item) {
+              const safeUrl = escapeHtmlValue(String(item.url || ''));
+              return '<div class="upload-card">' +
+                '<img src="' + safeUrl + '" alt="Uploaded image" />' +
+                '<a href="' + safeUrl + '" target="_blank" rel="noopener">' + safeUrl + '</a>' +
+                '<div class="upload-card-actions">' +
+                  '<button type="button" class="ghost-button" data-copy-upload="' + safeUrl + '">Copy URL</button>' +
+                  '<button type="button" class="ghost-button" data-insert-upload="' + safeUrl + '">Insert</button>' +
+                '</div>' +
+              '</div>';
+            })
+            .join('');
         }
 
         async function refreshUploads() {
@@ -861,21 +1303,8 @@ app.get('/admin', async (req, res, next) => {
             }
 
             const uploads = await response.json();
-            if (!Array.isArray(uploads) || uploads.length === 0) {
-              uploadsListEl.innerHTML = '<p class="upload-help">No images uploaded yet.</p>';
-              return;
-            }
-
-            uploadsListEl.innerHTML = uploads
-              .slice(0, 60)
-              .map(function (item) {
-                const safeUrl = String(item.url || '');
-                return '<div class="upload-card">' +
-                  '<img src="' + safeUrl + '" alt="Uploaded image" />' +
-                  '<a href="' + safeUrl + '" target="_blank" rel="noopener">' + safeUrl + '</a>' +
-                '</div>';
-              })
-              .join('');
+            cachedUploads = Array.isArray(uploads) ? uploads : [];
+            renderUploads();
           } catch {
             uploadsListEl.innerHTML = '<p class="upload-help">Failed to load uploaded images.</p>';
           }
@@ -945,23 +1374,76 @@ app.get('/admin', async (req, res, next) => {
         });
 
         if (galleryEditorEl && galleryForm && galleryPiecesJsonField) {
-          renderGalleryEditor(galleryEditorData && Array.isArray(galleryEditorData.pieces) ? galleryEditorData.pieces : []);
+          renderGalleryEditor();
 
           galleryEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
             const removeButton = event.target.closest('[data-remove-piece]');
             if (!removeButton) return;
 
             event.preventDefault();
+            syncVisiblePiecesIntoState();
             const index = Number(removeButton.getAttribute('data-remove-piece'));
-            const nextPieces = readPiecesFromDom().filter(function (_piece, pieceIndex) {
+            galleryPiecesState = galleryPiecesState.filter(function (_piece, pieceIndex) {
               return pieceIndex !== index;
             });
-            renderGalleryEditor(nextPieces);
+            renderGalleryEditor();
+          });
+
+          galleryEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const coverButton = event.target.closest('[data-set-cover]');
+            if (!coverButton) {
+              return;
+            }
+
+            event.preventDefault();
+            const card = coverButton.closest('[data-piece-card]');
+            const coverImageUrlField = card && card.querySelector('[data-field="coverImageUrl"]');
+            const nextCoverUrl = coverButton.getAttribute('data-set-cover') || '';
+
+            if (!(coverImageUrlField instanceof HTMLInputElement) || !nextCoverUrl) {
+              return;
+            }
+
+            coverImageUrlField.value = nextCoverUrl;
+            syncVisiblePiecesIntoState();
+            renderGalleryEditor();
+            setStatus('Cover image updated for this piece.', false);
+          });
+
+          galleryEditorEl.addEventListener('focusin', function (event) {
+            const target = event.target;
+            if (
+              target instanceof HTMLTextAreaElement &&
+              target.getAttribute('data-field') === 'imageUrls'
+            ) {
+              lastFocusedImageUrlsField = target;
+            }
           });
 
           galleryEditorEl.addEventListener('change', function (event) {
             const target = event.target;
             if (!(target instanceof HTMLSelectElement) || target.getAttribute('data-field') !== 'category') {
+              if (
+                target instanceof HTMLTextAreaElement &&
+                target.getAttribute('data-field') === 'imageUrls'
+              ) {
+                syncVisiblePiecesIntoState();
+                renderGalleryEditor();
+              } else if (
+                target instanceof HTMLInputElement &&
+                target.getAttribute('data-field') === 'featured'
+              ) {
+                syncVisiblePiecesIntoState();
+                renderGalleryEditor();
+              }
               return;
             }
 
@@ -974,13 +1456,15 @@ app.get('/admin', async (req, res, next) => {
             const category = getCategoryConfig(target.value);
             const nextSubcategory = category && Array.isArray(category.subcategories) ? category.subcategories[0] : '';
             subcategorySelect.innerHTML = getSubcategoryOptions(target.value, nextSubcategory);
+            syncVisiblePiecesIntoState();
+            renderGalleryEditor();
           });
 
           if (galleryAddPieceButton) {
             galleryAddPieceButton.addEventListener('click', function () {
-              const nextPieces = readPiecesFromDom();
+              syncVisiblePiecesIntoState();
               const fallbackCategory = galleryCategories[0] || { name: 'Living Room', subcategories: ['Tables'] };
-              nextPieces.push({
+              galleryPiecesState.push(normalizeEditorPiece({
                 id: '',
                 title: '',
                 category: fallbackCategory.name,
@@ -988,14 +1472,93 @@ app.get('/admin', async (req, res, next) => {
                 material: '',
                 note: '',
                 featured: false,
+                coverImageUrl: '',
                 imageUrls: [],
+              }));
+              renderGalleryEditor();
+            });
+          }
+
+          if (galleryPieceSearchInput) {
+            galleryPieceSearchInput.addEventListener('input', function () {
+              syncVisiblePiecesIntoState();
+              renderGalleryEditor();
+            });
+          }
+
+          if (galleryPieceCategoryFilter) {
+            galleryPieceCategoryFilter.addEventListener('change', function () {
+              syncVisiblePiecesIntoState();
+              renderGalleryEditor();
+            });
+          }
+
+          if (galleryExpandAllButton) {
+            galleryExpandAllButton.addEventListener('click', function () {
+              Array.from(galleryEditorEl.querySelectorAll('[data-piece-card]')).forEach(function (card) {
+                card.setAttribute('open', 'open');
               });
-              renderGalleryEditor(nextPieces);
+            });
+          }
+
+          if (galleryCollapseAllButton) {
+            galleryCollapseAllButton.addEventListener('click', function () {
+              Array.from(galleryEditorEl.querySelectorAll('[data-piece-card]')).forEach(function (card) {
+                card.removeAttribute('open');
+              });
             });
           }
 
           galleryForm.addEventListener('submit', function () {
-            galleryPiecesJsonField.value = JSON.stringify(readPiecesFromDom());
+            syncVisiblePiecesIntoState();
+            galleryPiecesJsonField.value = JSON.stringify(galleryPiecesState.filter(isMeaningfulPiece));
+          });
+        }
+
+        if (uploadsSearchInput) {
+          uploadsSearchInput.addEventListener('input', renderUploads);
+        }
+
+        if (uploadsListEl) {
+          uploadsListEl.addEventListener('click', async function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const copyButton = event.target.closest('[data-copy-upload]');
+            const insertButton = event.target.closest('[data-insert-upload]');
+
+            if (copyButton) {
+              const url = copyButton.getAttribute('data-copy-upload') || '';
+
+              try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  await navigator.clipboard.writeText(url);
+                  setStatus('Image URL copied to clipboard.', false);
+                } else {
+                  setStatus('Clipboard copy is unavailable in this browser context.', true);
+                }
+              } catch {
+                setStatus('Could not copy that URL automatically.', true);
+              }
+
+              return;
+            }
+
+            if (insertButton) {
+              const url = insertButton.getAttribute('data-insert-upload') || '';
+
+              if (!lastFocusedImageUrlsField || !document.contains(lastFocusedImageUrlsField)) {
+                setStatus('Select an Image URLs field first, then use Insert.', true);
+                return;
+              }
+
+              const currentValue = String(lastFocusedImageUrlsField.value || '').trim();
+              lastFocusedImageUrlsField.value = currentValue ? currentValue + '\\n' + url : url;
+              lastFocusedImageUrlsField.dispatchEvent(new Event('change', { bubbles: true }));
+              lastFocusedImageUrlsField.focus();
+              setStatus('Image URL inserted into the selected piece.', false);
+            }
           });
         }
 
@@ -1451,12 +2014,18 @@ app.post('/admin/messages/:id/delete', async (req, res, next) => {
   }
 });
 
-app.post('/api/contact/messages', contactMessageRateLimit, async (req, res, next) => {
+app.post('/api/contact/messages', async (req, res, next) => {
   try {
+    const ipAddress = req.ip || 'unknown';
+    if (isContactSubmissionRateLimited(ipAddress, Date.now())) {
+      res.redirect(303, getContactRedirectUrl('rate-limit'));
+      return;
+    }
+
     const parsed = parseContactMessageInput(req.body);
 
     if ('error' in parsed) {
-      res.redirect(303, '/#contact');
+      res.redirect(303, getContactRedirectUrl('error'));
       return;
     }
 
@@ -1467,7 +2036,7 @@ app.post('/api/contact/messages', contactMessageRateLimit, async (req, res, next
       res.cookie('session_token', token, {
         httpOnly: true,
         sameSite: 'lax',
-        secure: process.env.NODE_ENV === 'production',
+        secure: shouldUseSecureCookies(req),
         maxAge: 1000 * 60 * 60 * 24,
         path: '/',
       });
@@ -1480,7 +2049,7 @@ app.post('/api/contact/messages', contactMessageRateLimit, async (req, res, next
       userAgent: req.get('user-agent') ?? undefined,
     });
 
-    res.redirect(303, '/#contact');
+    res.redirect(303, getContactRedirectUrl('success'));
   } catch (error) {
     next(error);
   }
@@ -1678,16 +2247,29 @@ app.post('/api/cache/invalidate', (req, res) => {
 });
 
 const isTestEnvironment = process.env.NODE_ENV === 'test' || process.argv.includes('--test');
+const isProductionEnvironment = process.env.NODE_ENV === 'production';
+const shouldUseViteMiddleware = !isProductionEnvironment && !isTestEnvironment;
 
-const vite = await createViteServer({
-  server: {
-    middlewareMode: true,
-    hmr: isTestEnvironment ? false : undefined,
-  },
-  appType: 'custom',
-});
+const vite = shouldUseViteMiddleware
+  ? await createViteServer({
+      server: {
+        middlewareMode: true,
+      },
+      appType: 'custom',
+    })
+  : null;
 
-app.use(vite.middlewares);
+if (vite) {
+  app.use(vite.middlewares);
+} else {
+  app.use(
+    '/assets',
+    express.static(path.resolve(rootDir, 'dist/assets'), {
+      immutable: true,
+      maxAge: '1y',
+    })
+  );
+}
 
 app.get('*', async (req, res, next) => {
   try {
@@ -1700,11 +2282,16 @@ app.get('*', async (req, res, next) => {
     }
 
     const url = req.originalUrl;
-    const templatePath = path.resolve(rootDir, 'index.html');
+    const templatePath = path.resolve(rootDir, isProductionEnvironment ? 'dist/index.html' : 'index.html');
     let template = await readFile(templatePath, 'utf-8');
-    template = await vite.transformIndexHtml(url, template);
+    let render = renderApp;
 
-    const { render } = await vite.ssrLoadModule('/src/entry-server.tsx');
+    if (vite) {
+      template = await vite.transformIndexHtml(url, template);
+      const viteServerModule = await vite.ssrLoadModule('/src/entry-server.tsx');
+      render = viteServerModule.render;
+    }
+
     const heroContent = await getHeroContent();
     const aboutContent = await getAboutContent();
     const galleryContent = await getGalleryContent();
@@ -1719,7 +2306,9 @@ app.get('*', async (req, res, next) => {
 
     res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
   } catch (error) {
-    vite.ssrFixStacktrace(error as Error);
+    if (vite) {
+      vite.ssrFixStacktrace(error as Error);
+    }
     next(error);
   }
 });

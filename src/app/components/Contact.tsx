@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { ContactContent } from '../lib/contactContent';
 
 type ContactProps = {
@@ -5,6 +6,20 @@ type ContactProps = {
 };
 
 export function Contact({ content }: ContactProps) {
+  const [submissionState, setSubmissionState] = useState<null | 'success' | 'error' | 'rate-limit'>(null);
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const status = searchParams.get('contact');
+
+    if (status === 'success' || status === 'error' || status === 'rate-limit') {
+      setSubmissionState(status);
+      return;
+    }
+
+    setSubmissionState(null);
+  }, []);
+
   const eyebrow = content.eyebrow?.trim();
   const heading = content.heading?.trim();
   const description = content.description?.trim();
@@ -46,6 +61,22 @@ export function Contact({ content }: ContactProps) {
             </p>
           )}
         </div>
+
+        {submissionState ? (
+          <div
+            className={`mb-8 border px-5 py-4 text-sm leading-7 sm:px-6 ${
+              submissionState === 'success'
+                ? 'border-[#c9d9cc] bg-[#eef5ef] text-[#365340]'
+                : 'border-[#e2c2bb] bg-[#fbefec] text-[#7f4338]'
+            }`}
+          >
+            {submissionState === 'success'
+              ? 'Your inquiry has been sent successfully. The studio can now review the details and get back to you.'
+              : submissionState === 'rate-limit'
+                ? 'Too many inquiries were sent in a short time. Please wait a little and try again.'
+                : 'Something was missing or invalid in the form. Please review the details and send it again.'}
+          </div>
+        ) : null}
 
         <form className="space-y-6" action="/api/contact/messages" method="post">
           <div className="grid md:grid-cols-2 gap-6">
