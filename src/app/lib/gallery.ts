@@ -1,28 +1,6 @@
-export type GalleryCategoryName =
-  | 'Living Room'
-  | 'Dining Room'
-  | 'Outdoor Seating'
-  | 'Restroom'
-  | 'Bedroom';
+export type GalleryCategoryName = string;
 
-export type GallerySubcategoryName =
-  | 'Lights'
-  | 'Shelves'
-  | 'Tables'
-  | 'TV Unit'
-  | 'Chairs'
-  | 'Sofa'
-  | 'Wall Artwork'
-  | 'Mirrors'
-  | 'Benches'
-  | 'Buffet'
-  | 'Holders'
-  | 'Countertop'
-  | 'Wardrobe'
-  | 'Commode'
-  | 'Beds'
-  | 'Dressing Table'
-  | 'Hanger';
+export type GallerySubcategoryName = string;
 
 export type GalleryImageAsset = {
   src: string;
@@ -80,39 +58,46 @@ const categoryDefinitions: GalleryCategoryDefinition[] = [
     eyebrow: 'Gallery I',
     description:
       'Gathering pieces shaped around conversation, texture, and the slower rhythm of lived-in rooms.',
-    subcategories: ['Lights', 'Shelves', 'Tables', 'TV Unit', 'Chairs', 'Sofa', 'Wall Artwork', 'Mirrors'],
+    subcategories: ['Shelves', 'Tables', 'TV Unit', 'Chairs', 'Sofa', 'Wall Artwork'],
   },
   {
     name: 'Dining Room',
     eyebrow: 'Gallery II',
     description:
       'Tables, storage, and lighting composed for hosting, ceremony, and the quiet architecture of meals.',
-    subcategories: ['Shelves', 'Lights', 'Tables', 'Benches', 'Chairs', 'Mirrors', 'Buffet'],
+    subcategories: ['Shelves', 'Tables', 'Benches', 'Chairs', 'Buffet'],
   },
   {
     name: 'Outdoor Seating',
     eyebrow: 'Gallery III',
     description:
       'Open-air pieces documented through benches, lounge seating, lighting, planters, and relaxed exterior gatherings.',
-    subcategories: ['Chairs', 'Tables', 'Sofa', 'Lights'],
+    subcategories: ['Chairs', 'Tables', 'Sofa'],
   },
   {
     name: 'Restroom',
     eyebrow: 'Gallery IV',
     description:
       'Compact interventions where material choice, silhouette, and restraint do most of the visual work.',
-    subcategories: ['Holders', 'Countertop', 'Lights', 'Mirrors'],
+    subcategories: ['Holders', 'Countertop'],
   },
   {
     name: 'Bedroom',
     eyebrow: 'Gallery V',
     description:
       'Private-room pieces arranged around storage, tactility, and a sense of calm that lasts beyond trends.',
-    subcategories: ['Lights', 'Wardrobe', 'Commode', 'Beds', 'Dressing Table', 'Chairs', 'Hanger', 'Mirrors'],
+    subcategories: ['Wardrobe', 'Commode', 'Beds', 'Dressing Table', 'Chairs', 'Hanger'],
   },
+   {
+     name: 'Home Accessories',
+     eyebrow: 'Gallery VI',
+     description:
+       'Smaller objects and accents where craft, detail, and material expression take priority over scale.',
+     subcategories: ['Coasters', 'Lights', 'Mirrors'],
+   },
 ];
 
-const subcategoryNotes: Record<GallerySubcategoryName, string> = {
+const subcategoryNotes: Record<string, string> = {
   Lights: 'Lighting documented as atmosphere first, object second.',
   Shelves: 'Storage and display pieces treated as part of the room architecture.',
   Tables: 'Surfaces built to let grain, proportion, and edge do the storytelling.',
@@ -130,6 +115,7 @@ const subcategoryNotes: Record<GallerySubcategoryName, string> = {
   Beds: 'Bed frames built around presence, tactile comfort, and grounded proportion.',
   'Dressing Table': 'Private rituals supported by pieces that balance utility and lightness.',
   Hanger: 'Everyday hanging storage reworked with the character of solid timber.',
+  Coasters: 'Small tabletop objects shaped to bring tactility and calm to intimate details.',
 };
 
 const galleryFolderFiles: Record<string, string[]> = {
@@ -1215,6 +1201,22 @@ function inferPlacement(folderKey: string): {
   const [topFolder, rawName] = folderKey.split('/');
   const name = (rawName ?? topFolder).toLowerCase();
 
+  if (
+    name.includes('lamp') ||
+    name.includes('light') ||
+    name.includes('lighting') ||
+    name.includes('mirror') ||
+    name.includes('coaster')
+  ) {
+    if (name.includes('coaster')) {
+      return { category: 'Home Accessories', subcategory: 'Coasters' };
+    }
+    if (name.includes('mirror')) {
+      return { category: 'Home Accessories', subcategory: 'Mirrors' };
+    }
+    return { category: 'Home Accessories', subcategory: 'Lights' };
+  }
+
   if (folderKey === 'entry pictures') {
     return { category: 'Bedroom', subcategory: 'Beds' };
   }
@@ -1331,6 +1333,36 @@ function inferPlacement(folderKey: string): {
   }
 }
 
+const legacyPlacementOverrides = new Map<string, { category: GalleryCategoryName; subcategory: GallerySubcategoryName }>([
+  ['lighting-chandlier-from-tree-rings-with-live-edges', { category: 'Dining Room', subcategory: 'Lights' }],
+  ['home-accessories-side-lamp-from-live-tree-trunk', { category: 'Bedroom', subcategory: 'Lights' }],
+  ['chairs-diablo-side-chair-from-tree-stump-made-from-sisso-wood-whole-tree', { category: 'Dining Room', subcategory: 'Chairs' }],
+  ['chairs-massive-beech-wood-chair', { category: 'Dining Room', subcategory: 'Chairs' }],
+  ['chairs-massive-berry-wood-tree-side-chair', { category: 'Dining Room', subcategory: 'Chairs' }],
+  ['chairs-olive-wood-side-chair', { category: 'Dining Room', subcategory: 'Chairs' }],
+  ['chairs-rocking-chair-from-beech-wood', { category: 'Bedroom', subcategory: 'Chairs' }],
+  ['chairs-corner-chair-shoe-rack-with-shelves', { category: 'Bedroom', subcategory: 'Chairs' }],
+  ['chairs-mini-sofa-with-old-flank-wood', { category: 'Outdoor Seating', subcategory: 'Sofa' }],
+  ['chairs-sofa-from-old-flank-wood', { category: 'Outdoor Seating', subcategory: 'Sofa' }],
+  ['mirrors-oak-tree-wood-mirror-2-meter', { category: 'Dining Room', subcategory: 'Mirrors' }],
+  ['mirrors-round-mirror-from-tree-trunks', { category: 'Dining Room', subcategory: 'Mirrors' }],
+  ['mirrors-rectangelar-shape-mirror', { category: 'Bedroom', subcategory: 'Mirrors' }],
+]);
+
+function applyLegacyPlacementOverride(piece: GalleryPiece): GalleryPiece {
+  const override = legacyPlacementOverrides.get(piece.id);
+
+  if (!override) {
+    return piece;
+  }
+
+  return {
+    ...piece,
+    category: override.category,
+    subcategory: override.subcategory,
+  };
+}
+
 function encodeUploadPath(relativePath: string) {
   return relativePath
     .split('/')
@@ -1350,17 +1382,27 @@ function createPieceId(folderKey: string) {
   return folderKey.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-const categoryOrder = categoryDefinitions.map((category) => category.name);
+const defaultCategoryOrder = categoryDefinitions.map((category) => category.name);
 
-function sortGalleryPieces(pieces: GalleryPiece[]) {
+function sortGalleryPieces(pieces: GalleryPiece[], categoryOrder: string[] = defaultCategoryOrder) {
   return [...pieces].sort((left, right) => {
-    const categoryDelta = categoryOrder.indexOf(left.category) - categoryOrder.indexOf(right.category);
-    if (categoryDelta !== 0) {
-      return categoryDelta;
+    const leftIndex = categoryOrder.indexOf(left.category);
+    const rightIndex = categoryOrder.indexOf(right.category);
+
+    if (leftIndex !== rightIndex) {
+      if (leftIndex === -1) {
+        return 1;
+      }
+      if (rightIndex === -1) {
+        return -1;
+      }
+      return leftIndex - rightIndex;
     }
+
     if (left.subcategory !== right.subcategory) {
       return left.subcategory.localeCompare(right.subcategory);
     }
+
     return left.title.localeCompare(right.title);
   });
 }
@@ -1374,7 +1416,7 @@ const galleryPieces: GalleryPiece[] = Object.entries(galleryFolderFiles)
       createGalleryImageAsset(folderKey, fileName, title, index)
     );
 
-    return {
+    return applyLegacyPlacementOverride({
       id: createPieceId(folderKey),
       title,
       category: placement.category,
@@ -1385,7 +1427,7 @@ const galleryPieces: GalleryPiece[] = Object.entries(galleryFolderFiles)
       featured: featuredFolders.has(folderKey),
       image: images[0],
       images,
-    };
+    });
   });
 
 export const defaultGalleryContent: GalleryContent = {
@@ -1402,38 +1444,58 @@ export const defaultGalleryContent: GalleryContent = {
 };
 
 export function buildGalleryCategories(content: GalleryContent): GalleryCategory[] {
-  return content.categories.map((category) => ({
-    name: category.name,
-    eyebrow: category.eyebrow,
-    description: category.description,
-    subcategories: category.subcategories.map((subcategory) => ({
-      name: subcategory,
-      pieces: sortGalleryPieces(
-        content.pieces.filter(
-          (piece) => piece.category === category.name && piece.subcategory === subcategory
-        )
-      ),
-    })),
-  }));
+  const categoryByName = new Map(content.categories.map((category) => [category.name, category]));
+  const definedCategoryNames = content.categories.map((category) => category.name);
+  const pieceCategoryNames = Array.from(new Set(content.pieces.map((piece) => piece.category)));
+  const categoryOrder = [...definedCategoryNames, ...pieceCategoryNames.filter((name) => !definedCategoryNames.includes(name))];
+
+  return categoryOrder.map((categoryName) => {
+    const category = categoryByName.get(categoryName);
+    const piecesForCategory = content.pieces.filter((piece) => piece.category === categoryName);
+    const inferredSubcategoryNames = Array.from(new Set(piecesForCategory.map((piece) => piece.subcategory)));
+    const subcategoryNames = category
+      ? [...category.subcategories, ...inferredSubcategoryNames.filter((name) => !category.subcategories.includes(name))]
+      : inferredSubcategoryNames;
+
+    return {
+      name: categoryName,
+      eyebrow: category?.eyebrow ?? '',
+      description: category?.description ?? '',
+      subcategories: subcategoryNames.map((subcategory) => ({
+        name: subcategory,
+        pieces: sortGalleryPieces(
+          content.pieces.filter(
+            (piece) => piece.category === categoryName && piece.subcategory === subcategory
+          ),
+          categoryOrder
+        ),
+      })),
+    };
+  });
 }
 
 export function getFeaturedGalleryPieces(content: GalleryContent) {
-  return sortGalleryPieces(content.pieces.filter((piece) => piece.featured));
+  return sortGalleryPieces(content.pieces.filter((piece) => piece.featured), content.categories.map((category) => category.name));
 }
 
 export function getHomepageGalleryPieces(content: GalleryContent, count: number = 6) {
-  const featured = getFeaturedGalleryPieces(content);
+  const categoryOrder = content.categories.map((category) => category.name);
+  const featured = sortGalleryPieces(content.pieces.filter((piece) => piece.featured), categoryOrder);
   if (featured.length >= count) {
     return featured.slice(0, count);
   }
 
   const featuredIds = new Set(featured.map((piece) => piece.id));
-  const fallbackPieces = sortGalleryPieces(content.pieces).filter((piece) => !featuredIds.has(piece.id));
+  const fallbackPieces = sortGalleryPieces(content.pieces, categoryOrder).filter((piece) => !featuredIds.has(piece.id));
   return [...featured, ...fallbackPieces].slice(0, count);
 }
 
 export function getGalleryCategoryId(categoryName: GalleryCategoryName) {
-  return categoryName.toLowerCase().replace(/\s+/g, '-');
+  return categoryName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 export function getGalleryCategoryHref(categoryName: GalleryCategoryName) {

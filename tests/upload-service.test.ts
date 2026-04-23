@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { saveUploadedImage, listUploads } from '../server/upload-service';
+import { saveUploadedImage, listUploads, deleteUpload, createUploadFolder } from '../server/upload-service';
 
 const minimalPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
 const minimalJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0xff, 0xd9]);
@@ -90,6 +90,37 @@ test('listUploads sorts files by modified date descending', async () => {
   assert.equal(uploads.length, 2);
   // newer file (file2) comes first
   assert.ok(uploads[0].uploadedAt > uploads[1].uploadedAt);
+
+  // cleanup
+  await rm(dir, { recursive: true, force: true });
+});
+
+test('saveUploadedImage saves nested uploads into folders and deleteUpload removes them', async () => {
+  const dir = generateRandomDir();
+  const folder = 'nested/album';
+
+  await createUploadFolder(folder, dir);
+
+  const result = await saveUploadedImage(
+    {
+      folder: folder,
+      mimeType: 'image/png',
+      base64Data: minimalPng.toString('base64'),
+    },
+    dir
+  );
+
+  assert.ok(result.url.startsWith(`/uploads/${folder}/`));
+  assert.ok(result.url.endsWith('.png'));
+
+  const uploads = await listUploads(dir);
+  assert.equal(uploads.length, 1);
+  assert.equal(uploads[0].folder, folder);
+  assert.equal(uploads[0].path.startsWith(folder + '/'), true);
+
+  await deleteUpload(uploads[0].path, dir);
+  const remaining = await listUploads(dir);
+  assert.equal(remaining.length, 0);
 
   // cleanup
   await rm(dir, { recursive: true, force: true });

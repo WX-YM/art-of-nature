@@ -20,6 +20,7 @@ import { defaultCraftsmanshipContent, type CraftsmanshipContent } from '../src/a
 import {
   defaultJournalContent,
   getJournalPostBySlug,
+  getPublishedJournalPosts,
   slugifyJournalValue,
   type JournalContent,
   type JournalPost,
@@ -38,7 +39,7 @@ import {
   parseContactMessageInput,
   serializeForScript,
 } from './http-utils';
-import { uploadsDir, saveUploadedImage, listUploads } from './upload-service';
+import { uploadsDir, saveUploadedImage, listUploads, createUploadFolder, deleteUpload } from './upload-service';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -49,6 +50,14 @@ app.set('trust proxy', true);
 app.use(express.json({ limit: '12mb' }));
 app.use(express.urlencoded({ extended: true, limit: '12mb' }));
 app.use('/uploads', express.static(uploadsDir));
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  next();
+});
+app.use('/admin', (req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  next();
+});
 
 const cachedHtmlByPath = new Map<string, string>();
 const activeSessions = new Map<string, { userId: string; expiresAt: number }>();
@@ -133,6 +142,222 @@ function getGoogleOAuthRedirectUri(req: express.Request) {
 
 function slugifyEditorValue(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+type SeoMetadata = {
+  title: string;
+  description: string;
+  canonicalPath: string;
+  imageUrl: string;
+  ogType: 'website' | 'article';
+  robots: string;
+  articlePublishedTime?: string;
+  jsonLd: Record<string, unknown>[];
+};
+
+function normalizeSeoText(value: string | undefined, fallback: string) {
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  return normalized || fallback;
+}
+
+function resolveSiteOrigin(req: express.Request) {
+  const configuredOrigin = process.env.PUBLIC_SITE_URL ?? process.env.SITE_URL;
+
+  if (configuredOrigin) {
+    try {
+      return new URL(configuredOrigin).origin;
+    } catch {
+      // Ignore invalid URL values and fall back to request origin.
+    }
+  }
+
+  const forwardedProto = (req.get('x-forwarded-proto') ?? '').split(',')[0]?.trim();
+  const protocol = forwardedProto || req.protocol || 'https';
+  return `${protocol}://${req.get('host')}`;
+}
+
+function toAbsoluteUrl(origin: string, value: string) {
+  if (/^https?:\/\//i.test(value)) {
+    return value;
+  }
+
+  const normalizedPath = value.startsWith('/') ? value : `/${value}`;
+  return `${origin}${normalizedPath}`;
+}
+
+function injectSeoTags(template: string, seoTags: string) {
+  const withoutTitle = template.replace(/<title>[\s\S]*?<\/title>\s*/i, '');
+  const withoutDescription = withoutTitle.replace(/<meta\s+name=("|')description\1[^>]*>\s*/i, '');
+  const withoutCanonical = withoutDescription.replace(/<link\s+rel=("|')canonical\1[^>]*>\s*/i, '');
+  const withoutRobots = withoutCanonical.replace(/<meta\s+name=("|')robots\1[^>]*>\s*/i, '');
+
+  return withoutRobots.replace('</head>', `    ${seoTags}\n  </head>`);
+}
+
+function getSeoMetadata(
+  pathname: string,
+  origin: string,
+  heroContent: HeroContent,
+  galleryContent: GalleryContent,
+  journalContent: JournalContent
+): SeoMetadata {
+  const defaultImage = toAbsoluteUrl(origin, heroContent.backgroundImageUrl);
+  const websiteJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: 'Art of Nature',
+    url: origin,
+  };
+  const organizationJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'Organization',
+    name: 'Art of Nature',
+    url: origin,
+    logo: defaultImage,
+    contactPoint: [
+      {
+        '@type': 'ContactPoint',
+        telephone: '+20 103 042 2422',
+        contactType: 'customer service',
+        availableLanguage: ['English', 'Arabic'],
+      },
+    ],
+  };
+
+  if (pathname === '/gallery') {
+    return {
+      title: 'Gallery | Art of Nature',
+      description: normalizeSeoText(
+        galleryContent.pageDescription,
+        'Browse bespoke handcrafted furniture and interior craftsmanship from Art of Nature.'
+      ),
+      canonicalPath: '/gallery',
+      imageUrl: defaultImage,
+      ogType: 'website',
+      robots: 'index, follow, max-image-preview:large',
+      jsonLd: [websiteJsonLd, organizationJsonLd],
+    };
+  }
+
+  if (pathname === '/journal') {
+    return {
+      title: 'Journal | Art of Nature',
+      description: normalizeSeoText(
+        journalContent.pageDescription,
+        'Read material notes and studio insights from Art of Nature craftsmanship.'
+      ),
+      canonicalPath: '/journal',
+      imageUrl: defaultImage,
+      ogType: 'website',
+      robots: 'index, follow, max-image-preview:large',
+      jsonLd: [websiteJsonLd, organizationJsonLd],
+    };
+  }
+
+  if (pathname.startsWith('/journal/')) {
+    const slug = pathname.slice('/journal/'.length);
+    const post = getJournalPostBySlug(journalContent, slug);
+
+    if (post) {
+      return {
+        title: `${normalizeSeoText(post.title, 'Journal Article')} | Art of Nature`,
+        description: normalizeSeoText(
+          post.excerpt,
+          'Studio journal entry from Art of Nature on design and craftsmanship.'
+        ),
+        canonicalPath: `/journal/${post.slug}`,
+        imageUrl: toAbsoluteUrl(origin, post.coverImageUrl),
+        ogType: 'article',
+        robots: 'index, follow, max-image-preview:large',
+        articlePublishedTime: post.publishedAt,
+        jsonLd: [
+          websiteJsonLd,
+          organizationJsonLd,
+          {
+            '@context': 'https://schema.org',
+            '@type': 'BlogPosting',
+            headline: post.title,
+            description: post.excerpt,
+            image: [toAbsoluteUrl(origin, post.coverImageUrl)],
+            datePublished: post.publishedAt,
+            dateModified: post.publishedAt,
+            mainEntityOfPage: `${origin}/journal/${post.slug}`,
+            publisher: {
+              '@type': 'Organization',
+              name: 'Art of Nature',
+              logo: {
+                '@type': 'ImageObject',
+                url: defaultImage,
+              },
+            },
+          },
+        ],
+      };
+    }
+
+    return {
+      title: 'Article not found | Art of Nature',
+      description: 'The requested journal article could not be found.',
+      canonicalPath: pathname,
+      imageUrl: defaultImage,
+      ogType: 'website',
+      robots: 'noindex, nofollow',
+      jsonLd: [websiteJsonLd, organizationJsonLd],
+    };
+  }
+
+  return {
+    title: 'Art of Nature | Bespoke Gallery',
+    description: normalizeSeoText(
+      heroContent.description,
+      'Art of Nature showcases bespoke handcrafted furniture and interiors with quiet craftsmanship.'
+    ),
+    canonicalPath: '/',
+    imageUrl: defaultImage,
+    ogType: 'website',
+    robots: 'index, follow, max-image-preview:large',
+    jsonLd: [websiteJsonLd, organizationJsonLd],
+  };
+}
+
+function renderSeoTags(origin: string, metadata: SeoMetadata) {
+  const canonicalUrl = `${origin}${metadata.canonicalPath === '/' ? '/' : metadata.canonicalPath}`;
+  const jsonLdMarkup = metadata.jsonLd
+    .map((value) => `<script type="application/ld+json">${JSON.stringify(value)}</script>`)
+    .join('\n    ');
+
+  const tags = [
+    `<title>${escapeHtml(metadata.title)}</title>`,
+    `<meta name="description" content="${escapeHtml(metadata.description)}" />`,
+    `<meta name="robots" content="${escapeHtml(metadata.robots)}" />`,
+    `<link rel="canonical" href="${escapeHtml(canonicalUrl)}" />`,
+    '<meta property="og:site_name" content="Art of Nature" />',
+    '<meta property="og:locale" content="en_US" />',
+    `<meta property="og:type" content="${metadata.ogType}" />`,
+    `<meta property="og:title" content="${escapeHtml(metadata.title)}" />`,
+    `<meta property="og:description" content="${escapeHtml(metadata.description)}" />`,
+    `<meta property="og:url" content="${escapeHtml(canonicalUrl)}" />`,
+    `<meta property="og:image" content="${escapeHtml(metadata.imageUrl)}" />`,
+    '<meta name="twitter:card" content="summary_large_image" />',
+    `<meta name="twitter:title" content="${escapeHtml(metadata.title)}" />`,
+    `<meta name="twitter:description" content="${escapeHtml(metadata.description)}" />`,
+    `<meta name="twitter:image" content="${escapeHtml(metadata.imageUrl)}" />`,
+    '<meta name="theme-color" content="#1f1a17" />',
+  ];
+
+  if (metadata.articlePublishedTime) {
+    tags.push(`<meta property="article:published_time" content="${escapeHtml(metadata.articlePublishedTime)}" />`);
+  }
+
+  if (jsonLdMarkup) {
+    tags.push(jsonLdMarkup);
+  }
+
+  return tags.join('\n    ');
 }
 
 function parseGalleryPiecesJson(body: unknown): GalleryPiece[] {
@@ -367,6 +592,8 @@ app.get('/admin', async (req, res, next) => {
       respondHiddenNotFound(res);
       return;
     }
+
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
 
     const adminUrl = new URL(req.originalUrl, 'http://localhost');
     const requestedTab = adminUrl.searchParams.get('tab');
@@ -1049,6 +1276,8 @@ app.get('/admin', async (req, res, next) => {
         <p class="section-intro">Browse uploaded assets, copy their live URLs, and reuse them across hero, about, contact, and gallery content.</p>
         <div class="upload-library-toolbar">
           <p style="margin:0;"><label>Search Archive<br /><input type="search" id="uploads-search" placeholder="Filename, folder, or URL" /></label></p>
+          <p style="margin:0;"><label>Target Folder<br /><input type="text" id="uploads-folder" placeholder="e.g. hero/background" /></label></p>
+          <p style="margin:0;"><button type="button" id="create-upload-folder" class="ghost-button">Create Folder</button></p>
           <p class="upload-help" style="margin:0;">Upload images from the content forms above, then reuse those URLs anywhere across the website.</p>
         </div>
         <p class="upload-help" id="upload-status">Upload images from Hero/About forms above. Reuse URLs here later across the homepage and gallery.</p>
@@ -1271,6 +1500,8 @@ app.get('/admin', async (req, res, next) => {
         const statusEl = document.getElementById('upload-status');
         const uploadsListEl = document.getElementById('uploads-list');
         const uploadsSearchInput = document.getElementById('uploads-search');
+        const uploadsFolderInput = document.getElementById('uploads-folder');
+        const createUploadFolderButton = document.getElementById('create-upload-folder');
         const galleryEditorData = ${serializeForScript(galleryEditorState)};
         const galleryEditorEl = document.getElementById('gallery-piece-editor');
         const galleryAddPieceButton = document.getElementById('gallery-add-piece');
@@ -1864,12 +2095,15 @@ app.get('/admin', async (req, res, next) => {
           uploadsListEl.innerHTML = visibleUploads
             .map(function (item) {
               const safeUrl = escapeHtmlValue(String(item.url || ''));
+              const folderLabel = item.folder ? '<div class="upload-card-folder">' + escapeHtmlValue(item.folder) + '</div>' : '';
               return '<div class="upload-card">' +
                 '<img src="' + safeUrl + '" alt="Uploaded image" />' +
                 '<a href="' + safeUrl + '" target="_blank" rel="noopener">' + safeUrl + '</a>' +
+                folderLabel +
                 '<div class="upload-card-actions">' +
                   '<button type="button" class="ghost-button" data-copy-upload="' + safeUrl + '">Copy URL</button>' +
                   '<button type="button" class="ghost-button" data-insert-upload="' + safeUrl + '">Insert</button>' +
+                  '<button type="button" class="ghost-button" data-delete-upload="' + escapeHtmlValue(String(item.path || '')) + '">Delete</button>' +
                 '</div>' +
               '</div>';
             })
@@ -1880,7 +2114,10 @@ app.get('/admin', async (req, res, next) => {
           if (!uploadsListEl) return;
 
           try {
-            const response = await fetch('/api/uploads');
+            const response = await fetch('/api/uploads', {
+              cache: 'no-store',
+              credentials: 'same-origin',
+            });
             if (!response.ok) {
               throw new Error('Failed to load uploads.');
             }
@@ -1933,11 +2170,15 @@ app.get('/admin', async (req, res, next) => {
 
         async function uploadSingleImage(file) {
           const base64Data = await fileToBase64(file);
+          const targetFolder = uploadsFolderInput && uploadsFolderInput instanceof HTMLInputElement ? uploadsFolderInput.value.trim() : '';
           const response = await fetch('/api/uploads', {
             method: 'POST',
+            cache: 'no-store',
+            credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               fileName: file.name,
+              folder: targetFolder || undefined,
               mimeType: file.type,
               base64Data: base64Data,
             }),
@@ -1962,7 +2203,8 @@ app.get('/admin', async (req, res, next) => {
         }
 
         document.querySelectorAll('.image-upload-button').forEach(function (button) {
-          button.addEventListener('click', async function () {
+          button.addEventListener('click', async function (event) {
+            event.preventDefault();
             const targetField = button.getAttribute('data-target-field');
             if (!targetField) return;
 
@@ -1987,6 +2229,76 @@ app.get('/admin', async (req, res, next) => {
             }
           });
         });
+
+        document.addEventListener('click', async function (event) {
+          if (!(event.target instanceof Element)) {
+            return;
+          }
+
+          const deleteButton = event.target.closest('[data-delete-upload]');
+          if (!deleteButton) {
+            return;
+          }
+
+          event.preventDefault();
+          const targetPath = deleteButton.getAttribute('data-delete-upload');
+          if (!targetPath) {
+            setStatus('Unable to identify file to delete.', true);
+            return;
+          }
+
+          try {
+            setStatus('Deleting upload...', false);
+            const response = await fetch('/api/uploads?path=' + encodeURIComponent(targetPath), {
+              method: 'DELETE',
+              cache: 'no-store',
+              credentials: 'same-origin',
+            });
+
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({}));
+              throw new Error(payload && payload.message ? payload.message : 'Delete failed.');
+            }
+
+            setStatus('Upload deleted. Refreshing list...', false);
+            await refreshUploads();
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Delete failed.';
+            setStatus(message, true);
+          }
+        });
+
+        if (createUploadFolderButton) {
+          createUploadFolderButton.addEventListener('click', async function () {
+            const folderName = uploadsFolderInput && uploadsFolderInput instanceof HTMLInputElement ? uploadsFolderInput.value.trim() : '';
+            if (!folderName) {
+              setStatus('Enter a folder path first.', true);
+              return;
+            }
+
+            try {
+              setStatus('Creating folder...', false);
+              const response = await fetch('/api/uploads/folders', {
+                method: 'POST',
+                cache: 'no-store',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ folder: folderName }),
+              });
+
+              const payload = await response.json();
+              if (!response.ok || !payload || typeof payload.path !== 'string') {
+                throw new Error(payload && payload.message ? payload.message : 'Could not create folder.');
+              }
+
+              setStatus('Folder created: ' + payload.path, false);
+              refreshUploads();
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Could not create folder.';
+              setStatus(message, true);
+            }
+          });
+        }
 
         if (galleryEditorEl && galleryForm && galleryPiecesJsonField) {
           renderGalleryEditor();
@@ -3166,9 +3478,15 @@ app.get('/api/uploads', async (req, res, next) => {
       return;
     }
 
-    const uploads = await listUploads();
+    const requestedPath = typeof req.query.path === 'string' ? req.query.path : undefined;
+    const uploads = await listUploads(uploadsDir, { path: requestedPath });
     res.json(uploads);
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Invalid')) {
+      res.status(400).json({ message: error.message });
+      return;
+    }
+
     next(error);
   }
 });
@@ -3184,7 +3502,59 @@ app.post('/api/uploads', async (req, res, next) => {
     const uploaded = await saveUploadedImage(req.body);
     res.status(201).json(uploaded);
   } catch (error) {
-    if (error instanceof Error && (error.message.startsWith('Invalid') || error.message.startsWith('Missing'))) {
+    if (error instanceof Error && (error.message.startsWith('Invalid') || error.message.startsWith('Missing') || error.message.startsWith('File not found'))) {
+      res.status(400).json({ message: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.delete('/api/uploads', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const requestedPath = typeof req.query.path === 'string' ? req.query.path : undefined;
+    if (!requestedPath) {
+      res.status(400).json({ message: 'Missing path.' });
+      return;
+    }
+
+    await deleteUpload(requestedPath);
+    res.status(204).end();
+  } catch (error) {
+    if (error instanceof Error && error.message === 'File not found.') {
+      res.status(404).json({ message: error.message });
+      return;
+    }
+
+    if (error instanceof Error && error.message.startsWith('Invalid')) {
+      res.status(400).json({ message: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/uploads/folders', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const payload = req.body as { folder?: unknown };
+    const created = await createUploadFolder(payload.folder);
+    res.status(201).json(created);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Invalid')) {
       res.status(400).json({ message: error.message });
       return;
     }
@@ -3354,13 +3724,50 @@ if (vite) {
   );
 }
 
+app.get('/robots.txt', (req, res) => {
+  const origin = resolveSiteOrigin(req);
+  const body = ['User-agent: *', 'Allow: /', `Sitemap: ${origin}/sitemap.xml`].join('\n');
+
+  res.status(200).set({ 'Content-Type': 'text/plain; charset=utf-8' }).send(body);
+});
+
+app.get('/sitemap.xml', async (req, res, next) => {
+  try {
+    const origin = resolveSiteOrigin(req);
+    const journalContent = await getJournalContent();
+    const journalUrls = getPublishedJournalPosts(journalContent).map((post) => ({
+      loc: `${origin}/journal/${post.slug}`,
+      lastmod: post.publishedAt,
+      changefreq: 'monthly',
+      priority: '0.70',
+    }));
+    const staticUrls = [
+      { loc: `${origin}/`, changefreq: 'weekly', priority: '1.00' },
+      { loc: `${origin}/gallery`, changefreq: 'weekly', priority: '0.90' },
+      { loc: `${origin}/journal`, changefreq: 'weekly', priority: '0.85' },
+    ];
+    const entries = [...staticUrls, ...journalUrls]
+      .map((entry) => {
+        const lastmodTag = entry.lastmod ? `<lastmod>${escapeHtml(entry.lastmod)}</lastmod>` : '';
+
+        return `<url><loc>${escapeHtml(entry.loc)}</loc>${lastmodTag}<changefreq>${entry.changefreq}</changefreq><priority>${entry.priority}</priority></url>`;
+      })
+      .join('');
+    const xml = `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${entries}</urlset>`;
+
+    res.status(200).set({ 'Content-Type': 'application/xml; charset=utf-8' }).send(xml);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('*', async (req, res, next) => {
   try {
     const cacheKey = req.path;
     const cachedHtml = cachedHtmlByPath.get(cacheKey);
 
     if (cachedHtml) {
-      res.status(200).set({ 'Content-Type': 'text/html' }).end(cachedHtml);
+      res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, no-cache, must-revalidate, private' }).end(cachedHtml);
       return;
     }
 
@@ -3390,6 +3797,10 @@ app.get('*', async (req, res, next) => {
       craftsmanshipContent,
       req.path
     );
+    const siteOrigin = resolveSiteOrigin(req);
+    const seoMetadata = getSeoMetadata(req.path, siteOrigin, heroContent, galleryContent, journalContent);
+    const seoTags = renderSeoTags(siteOrigin, seoMetadata);
+    template = injectSeoTags(template, seoTags);
 
     if (req.path.startsWith('/journal/') && !getJournalPostBySlug(journalContent, req.path.slice('/journal/'.length))) {
       res.status(404);

@@ -179,24 +179,16 @@ export function GalleryPage({ content }: GalleryPageProps) {
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {galleryCategories.map((category, index) => {
             const pieceCount = getPieceCount(category);
-
             return (
               <a
                 key={category.name}
                 href={`#${getGalleryCategoryId(category.name)}`}
-                className="reveal-up panel-surface flex min-h-[9rem] flex-col justify-between p-5 transition-transform duration-300 hover:-translate-y-1"
+                className="reveal-center panel-surface flex min-h-[9rem] items-center justify-center p-5 transition-transform duration-300 hover:-translate-y-1"
                 style={{ animationDelay: `${0.06 * (index + 1)}s` }}
               >
-                <p className="text-[0.74rem] uppercase tracking-[0.26em] text-foreground/45">
-                  {category.eyebrow}
-                </p>
-                <div>
-                  <h2 className="text-[1.55rem] leading-tight">{category.name}</h2>
-                  <p className="mt-2 text-sm leading-7 text-foreground/62">
-                    {category.subcategories.length} sections · {pieceCount} piece
-                    {pieceCount === 1 ? '' : 's'}
-                  </p>
-                </div>
+                <h2 className="w-full text-center flex items-center justify-center text-[1.55rem] leading-tight">
+                  {category.name}
+                </h2>
               </a>
             );
           })}

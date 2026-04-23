@@ -1,4 +1,4 @@
-import { mkdir, readdir, writeFile, stat } from 'node:fs/promises';
+import { mkdir, readdir, writeFile, stat, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -17,8 +17,18 @@ export const allowedImageMimeToExtension: Record<string, string> = {
 
 export type UploadRequestBody = {
   fileName?: string;
+  folder?: string;
   mimeType?: string;
   base64Data?: string;
+};
+
+export type UploadListEntry = {
+  name: string;
+  path: string;
+  folder: string;
+  url: string;
+  size: number;
+  uploadedAt: string;
 };
 
 const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -58,7 +68,71 @@ function hasExpectedImageSignature(buffer: Buffer, mimeType: string) {
   }
 }
 
-export async function saveUploadedImage(body: unknown, targetDir: string = uploadsDir, maxSize: number = maxUploadSizeBytes) {
+function normalizeRelativePath(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  const normalized = value.replace(/\\/g, '/').trim();
+  const segments = normalized
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  if (segments.some((segment) => segment === '..')) {
+    throw new Error('Invalid path.');
+  }
+
+  return segments.join('/');
+}
+
+function resolveUploadDirectory(relativeFolder: unknown, rootDir: string) {
+  const normalizedFolder = normalizeRelativePath(relativeFolder);
+  if (!normalizedFolder) {
+    return rootDir;
+  }
+
+  const resolved = path.resolve(rootDir, normalizedFolder);
+  const relative = path.relative(rootDir, resolved);
+
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Invalid target folder.');
+  }
+
+  return resolved;
+}
+
+function resolveUploadFilePath(relativePath: unknown, rootDir: string) {
+  const normalizedPath = normalizeRelativePath(relativePath);
+  if (!normalizedPath) {
+    throw new Error('Missing path.');
+  }
+
+  const resolved = path.resolve(rootDir, normalizedPath);
+  const relative = path.relative(rootDir, resolved);
+
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Invalid path.');
+  }
+
+  return resolved;
+}
+
+function generateUploadFileName(extension: string, originalName?: string) {
+  const safeBase = typeof originalName === 'string'
+    ? path.basename(originalName).replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+    : '';
+
+  const uniqueSuffix = `${Date.now()}-${randomBytes(8).toString('hex')}`;
+  const cleanBase = safeBase ? `${safeBase}-${uniqueSuffix}` : uniqueSuffix;
+  return `${cleanBase}.${extension}`;
+}
+
+export async function saveUploadedImage(
+  body: unknown,
+  targetDir: string = uploadsDir,
+  maxSize: number = maxUploadSizeBytes
+) {
   const payload = body as UploadRequestBody;
   const mimeType = typeof payload?.mimeType === 'string' ? payload.mimeType.trim().toLowerCase() : '';
   const extension = allowedImageMimeToExtension[mimeType];
@@ -81,35 +155,44 @@ export async function saveUploadedImage(body: unknown, targetDir: string = uploa
     throw new Error('Invalid image data.');
   }
 
-  const uploadedName = `${Date.now()}-${randomBytes(8).toString('hex')}.${extension}`;
-  await mkdir(targetDir, { recursive: true });
-  await writeFile(path.resolve(targetDir, uploadedName), fileBuffer);
+  const uploadDir = resolveUploadDirectory(payload?.folder, targetDir);
+  const uploadedName = generateUploadFileName(extension, payload?.fileName);
+
+  await mkdir(uploadDir, { recursive: true });
+  await writeFile(path.resolve(uploadDir, uploadedName), fileBuffer);
+
+  const relativePath = path.relative(targetDir, path.resolve(uploadDir, uploadedName)).split(path.sep).join('/');
 
   return {
-    url: `/uploads/${uploadedName}`,
+    url: `/uploads/${relativePath}`,
   };
 }
 
-export async function listUploads(targetDir: string = uploadsDir) {
-  await mkdir(targetDir, { recursive: true });
-  const files: Array<{ name: string; url: string; size: number; uploadedAt: string }> = [];
+export async function listUploads(targetDir: string = uploadsDir, options?: { path?: unknown }) {
+  const rootDir = resolveUploadDirectory(options?.path, targetDir);
+  await mkdir(rootDir, { recursive: true });
 
-  async function walk(currentDir: string, relativeDir: string = ''): Promise<void> {
+  const files: Array<UploadListEntry> = [];
+
+  async function walk(currentDir: string): Promise<void> {
     const names = await readdir(currentDir);
 
     await Promise.all(
       names.map(async (name) => {
         const fullPath = path.resolve(currentDir, name);
         const fileStats = await stat(fullPath);
-        const relativePath = relativeDir ? `${relativeDir}/${name}` : name;
+        const relativePath = path.relative(targetDir, fullPath).split(path.sep).join('/');
+        const folderPath = path.dirname(relativePath).split(path.sep).join('/');
 
         if (fileStats.isDirectory()) {
-          await walk(fullPath, relativePath);
+          await walk(fullPath);
           return;
         }
 
         files.push({
-          name: relativePath,
+          name: path.basename(relativePath),
+          path: relativePath,
+          folder: folderPath === '.' ? '' : folderPath,
           url: `/uploads/${relativePath
             .split('/')
             .map((segment) => encodeURIComponent(segment))
@@ -121,7 +204,26 @@ export async function listUploads(targetDir: string = uploadsDir) {
     );
   }
 
-  await walk(targetDir);
+  await walk(rootDir);
 
   return files.sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1));
+}
+
+export async function createUploadFolder(relativeFolder: unknown, targetDir: string = uploadsDir) {
+  const folderPath = resolveUploadDirectory(relativeFolder, targetDir);
+  await mkdir(folderPath, { recursive: true });
+  return {
+    path: path.relative(targetDir, folderPath).split(path.sep).join('/'),
+  };
+}
+
+export async function deleteUpload(relativePath: unknown, targetDir: string = uploadsDir) {
+  const fullPath = resolveUploadFilePath(relativePath, targetDir);
+  const fileStats = await stat(fullPath).catch(() => null);
+
+  if (!fileStats || !fileStats.isFile()) {
+    throw new Error('File not found.');
+  }
+
+  await rm(fullPath);
 }

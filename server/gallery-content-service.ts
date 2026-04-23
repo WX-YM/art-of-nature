@@ -15,14 +15,6 @@ type GalleryContentDocument = GalleryContent & {
   key: string;
 };
 
-const allowedCategoryNames = new Set<GalleryCategoryName>(
-  defaultGalleryContent.categories.map((category) => category.name)
-);
-
-const allowedSubcategoryNames = new Set<GallerySubcategoryName>(
-  defaultGalleryContent.categories.flatMap((category) => category.subcategories)
-);
-
 function normalizeText(value: unknown, fallback: string, maxLength: number) {
   const parsed = typeof value === 'string' ? value.trim() : '';
   if (!parsed || parsed.length > maxLength) {
@@ -108,12 +100,8 @@ function normalizePiece(value: unknown): GalleryPiece | null {
     return null;
   }
 
-  const category = allowedCategoryNames.has(raw.category as GalleryCategoryName)
-    ? (raw.category as GalleryCategoryName)
-    : null;
-  const subcategory = allowedSubcategoryNames.has(raw.subcategory as GallerySubcategoryName)
-    ? (raw.subcategory as GallerySubcategoryName)
-    : null;
+  const category = typeof raw.category === 'string' ? normalizeText(raw.category, '', 120) : '';
+  const subcategory = typeof raw.subcategory === 'string' ? normalizeText(raw.subcategory, '', 120) : '';
 
   if (!category || !subcategory) {
     return null;
@@ -156,21 +144,33 @@ function normalizePiece(value: unknown): GalleryPiece | null {
 function normalizeCategories(categories: unknown): GalleryCategoryDefinition[] {
   const inputCategories = Array.isArray(categories) ? categories : [];
 
-  return defaultGalleryContent.categories.map((defaultCategory) => {
-    const match = inputCategories.find(
-      (category) =>
-        category &&
-        typeof category === 'object' &&
-        (category as { name?: unknown }).name === defaultCategory.name
-    ) as Partial<GalleryCategoryDefinition> | undefined;
+  return inputCategories
+    .map((category) => {
+      if (!category || typeof category !== 'object') {
+        return null;
+      }
 
-    return {
-      name: defaultCategory.name,
-      eyebrow: normalizeText(match?.eyebrow, defaultCategory.eyebrow, 120),
-      description: normalizeText(match?.description, defaultCategory.description, 3000),
-      subcategories: defaultCategory.subcategories,
-    };
-  });
+      const rawCategory = category as Partial<GalleryCategoryDefinition>;
+      const name = normalizeText(rawCategory.name, '', 120);
+      if (!name) {
+        return null;
+      }
+
+      const subcategories = Array.isArray(rawCategory.subcategories)
+        ? rawCategory.subcategories
+            .filter((subcategory): subcategory is string => typeof subcategory === 'string' && subcategory.trim().length > 0)
+            .map((subcategory) => normalizeText(subcategory, '', 120))
+            .filter(Boolean)
+        : [];
+
+      return {
+        name,
+        eyebrow: normalizeText(rawCategory.eyebrow, '', 120),
+        description: normalizeText(rawCategory.description, '', 3000),
+        subcategories,
+      };
+    })
+    .filter((category): category is GalleryCategoryDefinition => category !== null);
 }
 
 export function normalizeGalleryContent(content: unknown): GalleryContent {
