@@ -5,6 +5,8 @@ import {
   deriveStructuredContentSeedFromDefaults,
   getRankedGalleryCategories,
   normalizeGalleryCategoryPayload,
+  normalizeRank,
+  upsertGalleryCategoryStructure,
   upsertGalleryCategoryRecord,
 } from '../server/structured-content-service';
 import { GalleryCategoryRecordModel } from '../server/models/GalleryCategoryRecord';
@@ -48,20 +50,27 @@ test('normalizeGalleryCategoryPayload trims values and derives slug/key', () => 
   });
 });
 
+test('normalizeRank accepts numeric strings for manual database edits', () => {
+  assert.equal(normalizeRank('0', 8), 0);
+  assert.equal(normalizeRank(' 12 ', 8), 12);
+  assert.equal(normalizeRank('not-a-number', 8), 8);
+});
+
 test('getRankedGalleryCategories sorts ranked categories ascending', async () => {
   const originalFind = GalleryCategoryRecordModel.find;
 
   (GalleryCategoryRecordModel as unknown as {
     find: typeof GalleryCategoryRecordModel.find;
   }).find = (() => ({
-    sort: () => ({
-      lean: async () => [{ key: 'a', rank: 0 }, { key: 'b', rank: 1 }],
-    }),
+    lean: async () => [{ key: 'b', rank: '6', name: 'Living Room' }, { key: 'a', rank: '0', name: 'Test 7' }],
   })) as typeof GalleryCategoryRecordModel.find;
 
   try {
     const result = await getRankedGalleryCategories();
-    assert.deepEqual(result, [{ key: 'a', rank: 0 }, { key: 'b', rank: 1 }]);
+    assert.deepEqual(result, [
+      { key: 'a', rank: 0, name: 'Test 7' },
+      { key: 'b', rank: 6, name: 'Living Room' },
+    ]);
   } finally {
     (GalleryCategoryRecordModel as unknown as {
       find: typeof GalleryCategoryRecordModel.find;
@@ -110,6 +119,125 @@ test('upsertGalleryCategoryRecord persists a normalized ranked category', async 
     (GalleryCategoryRecordModel as unknown as {
       findOneAndUpdate: typeof GalleryCategoryRecordModel.findOneAndUpdate;
     }).findOneAndUpdate = originalFindOneAndUpdate;
+  }
+});
+
+test('upsertGalleryCategoryStructure stores a category with ranked subcategories', async () => {
+  const originalCountDocuments = GalleryCategoryRecordModel.countDocuments;
+  const originalCategoryFindOneAndUpdate = GalleryCategoryRecordModel.findOneAndUpdate;
+  const originalSubcategoryFind = GallerySubcategoryRecordModel.find;
+  const originalSubcategoryFindOneAndUpdate = GallerySubcategoryRecordModel.findOneAndUpdate;
+  const originalSubcategoryDeleteMany = GallerySubcategoryRecordModel.deleteMany;
+  const originalUpdateMany = GalleryItemRecordModel.updateMany;
+
+  (GalleryCategoryRecordModel as unknown as {
+    countDocuments: typeof GalleryCategoryRecordModel.countDocuments;
+  }).countDocuments = (async () => 7) as typeof GalleryCategoryRecordModel.countDocuments;
+
+  (GalleryCategoryRecordModel as unknown as {
+    findOneAndUpdate: typeof GalleryCategoryRecordModel.findOneAndUpdate;
+  }).findOneAndUpdate = ((filter: unknown, update: unknown) => {
+    assert.deepEqual(filter, { key: 'test-7' });
+    assert.deepEqual(update, {
+      key: 'test-7',
+      slug: 'test-7',
+      name: 'Test 7',
+      eyebrow: 'Gallery VII',
+      description: 'Experimental room edits.',
+      rank: 0,
+    });
+    return Promise.resolve(update);
+  }) as typeof GalleryCategoryRecordModel.findOneAndUpdate;
+
+  (GallerySubcategoryRecordModel as unknown as {
+    find: typeof GallerySubcategoryRecordModel.find;
+  }).find = (() => ({
+    lean: async () => [],
+  })) as typeof GallerySubcategoryRecordModel.find;
+
+  const savedSubcategories: unknown[] = [];
+  (GallerySubcategoryRecordModel as unknown as {
+    findOneAndUpdate: typeof GallerySubcategoryRecordModel.findOneAndUpdate;
+  }).findOneAndUpdate = ((_filter: unknown, update: unknown) => {
+    savedSubcategories.push(update);
+    return Promise.resolve(update);
+  }) as typeof GallerySubcategoryRecordModel.findOneAndUpdate;
+
+  (GallerySubcategoryRecordModel as unknown as {
+    deleteMany: typeof GallerySubcategoryRecordModel.deleteMany;
+  }).deleteMany = ((filter: unknown) => {
+    assert.deepEqual(filter, {
+      categoryKey: 'test-7',
+      key: { $nin: ['test-7:seating', 'test-7:lighting'] },
+    });
+    return Promise.resolve({ acknowledged: true, deletedCount: 0 });
+  }) as typeof GallerySubcategoryRecordModel.deleteMany;
+
+  (GalleryItemRecordModel as unknown as {
+    updateMany: typeof GalleryItemRecordModel.updateMany;
+  }).updateMany = ((filter: unknown, update: unknown) => {
+    assert.deepEqual(filter, { categoryKey: 'test-7' });
+    assert.deepEqual(update, {
+      $set: {
+        categoryName: 'Test 7',
+        categorySlug: 'test-7',
+      },
+    });
+    return Promise.resolve({ acknowledged: true, modifiedCount: 0 });
+  }) as typeof GalleryItemRecordModel.updateMany;
+
+  try {
+    const result = await upsertGalleryCategoryStructure({
+      name: 'Test 7',
+      eyebrow: 'Gallery VII',
+      description: 'Experimental room edits.',
+      rank: '0',
+      subcategories: ['Seating', 'Lighting'],
+    });
+
+    assert.equal(result.category.rank, 0);
+    assert.deepEqual(savedSubcategories, [
+      {
+        key: 'test-7:seating',
+        slug: 'seating',
+        name: 'Seating',
+        categoryKey: 'test-7',
+        categorySlug: 'test-7',
+        categoryName: 'Test 7',
+        rank: 0,
+      },
+      {
+        key: 'test-7:lighting',
+        slug: 'lighting',
+        name: 'Lighting',
+        categoryKey: 'test-7',
+        categorySlug: 'test-7',
+        categoryName: 'Test 7',
+        rank: 1,
+      },
+    ]);
+  } finally {
+    (GalleryCategoryRecordModel as unknown as {
+      countDocuments: typeof GalleryCategoryRecordModel.countDocuments;
+      findOneAndUpdate: typeof GalleryCategoryRecordModel.findOneAndUpdate;
+    }).countDocuments = originalCountDocuments;
+    (GalleryCategoryRecordModel as unknown as {
+      findOneAndUpdate: typeof GalleryCategoryRecordModel.findOneAndUpdate;
+    }).findOneAndUpdate = originalCategoryFindOneAndUpdate;
+    (GallerySubcategoryRecordModel as unknown as {
+      find: typeof GallerySubcategoryRecordModel.find;
+      findOneAndUpdate: typeof GallerySubcategoryRecordModel.findOneAndUpdate;
+      deleteMany: typeof GallerySubcategoryRecordModel.deleteMany;
+    }).find = originalSubcategoryFind;
+    (GallerySubcategoryRecordModel as unknown as {
+      findOneAndUpdate: typeof GallerySubcategoryRecordModel.findOneAndUpdate;
+    }).findOneAndUpdate = originalSubcategoryFindOneAndUpdate;
+    (GallerySubcategoryRecordModel as unknown as {
+      deleteMany: typeof GallerySubcategoryRecordModel.deleteMany;
+    }).deleteMany = originalSubcategoryDeleteMany;
+    (GalleryItemRecordModel as unknown as {
+      updateMany: typeof GalleryItemRecordModel.updateMany;
+    }).updateMany = originalUpdateMany;
   }
 });
 

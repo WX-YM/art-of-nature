@@ -77,6 +77,21 @@ function toKey(value: string) {
   return slugifyJournalValue(value);
 }
 
+function compareRankedByName(
+  left: { rank?: unknown; name?: unknown },
+  right: { rank?: unknown; name?: unknown },
+) {
+  const leftRank = normalizeRank(left.rank, Number.MAX_SAFE_INTEGER);
+  const rightRank = normalizeRank(right.rank, Number.MAX_SAFE_INTEGER);
+  if (leftRank !== rightRank) {
+    return leftRank - rightRank;
+  }
+
+  const leftName = typeof left.name === 'string' ? left.name : '';
+  const rightName = typeof right.name === 'string' ? right.name : '';
+  return leftName.localeCompare(rightName);
+}
+
 function deriveGalleryCategoryRecord(category: GalleryCategoryDefinition, rank: number): GalleryCategoryRecord {
   const slug = toKey(category.name);
   return {
@@ -241,7 +256,21 @@ export async function seedStructuredContent(options?: { reset?: boolean; syncLeg
 }
 
 export function normalizeRank(value: unknown, fallback: number = 0) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed) {
+      const parsed = Number(trimmed);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return fallback;
 }
 
 export function normalizeGalleryCategoryPayload(
@@ -278,7 +307,14 @@ export function normalizeGalleryCategoryPayload(
 }
 
 export async function getRankedGalleryCategories() {
-  return GalleryCategoryRecordModel.find({}).sort({ rank: 1, name: 1 }).lean();
+  const categories = await GalleryCategoryRecordModel.find({}).lean();
+
+  return categories
+    .map((category) => ({
+      ...category,
+      rank: normalizeRank(category.rank, Number.MAX_SAFE_INTEGER),
+    }))
+    .sort(compareRankedByName);
 }
 
 export async function upsertGalleryCategoryRecord(input: unknown) {
@@ -296,6 +332,87 @@ export async function upsertGalleryCategoryRecord(input: unknown) {
   );
 
   return saved ?? normalized;
+}
+
+function normalizeGallerySubcategoryNames(input: unknown) {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      input
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .map((value) => value.slice(0, 120))
+    )
+  );
+}
+
+export async function upsertGalleryCategoryStructure(input: unknown) {
+  const fallbackRank = await GalleryCategoryRecordModel.countDocuments({});
+  const normalized = normalizeGalleryCategoryPayload(input, fallbackRank);
+
+  if (!normalized) {
+    throw new Error('Invalid category payload.');
+  }
+
+  const raw = input as { subcategories?: unknown };
+  const subcategoryNames = normalizeGallerySubcategoryNames(raw?.subcategories);
+
+  const savedCategory = await GalleryCategoryRecordModel.findOneAndUpdate(
+    { key: normalized.key },
+    normalized,
+    { upsert: true, new: true, setDefaultsOnInsert: true, lean: true }
+  );
+
+  const existingSubcategories = await GallerySubcategoryRecordModel.find({ categoryKey: normalized.key }).lean();
+  const existingBySlug = new Map(existingSubcategories.map((subcategory) => [subcategory.slug, subcategory]));
+
+  const subcategoryRecords = subcategoryNames.map((name, rank) => {
+    const slug = toKey(name);
+    const existing = existingBySlug.get(slug);
+    return {
+      key: `${normalized.key}:${slug}`,
+      slug,
+      name,
+      categoryKey: normalized.key,
+      categorySlug: normalized.slug,
+      categoryName: normalized.name,
+      rank: normalizeRank(existing?.rank, rank),
+    };
+  });
+
+  await Promise.all(
+    subcategoryRecords.map((subcategory) =>
+      GallerySubcategoryRecordModel.findOneAndUpdate(
+        { key: subcategory.key },
+        subcategory,
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      )
+    )
+  );
+
+  await GallerySubcategoryRecordModel.deleteMany({
+    categoryKey: normalized.key,
+    key: { $nin: subcategoryRecords.map((subcategory) => subcategory.key) },
+  });
+
+  await GalleryItemRecordModel.updateMany(
+    { categoryKey: normalized.key },
+    {
+      $set: {
+        categoryName: normalized.name,
+        categorySlug: normalized.slug,
+      },
+    }
+  );
+
+  return {
+    category: savedCategory ?? normalized,
+    subcategories: subcategoryRecords.sort(compareRankedByName),
+  };
 }
 
 export async function deleteGalleryCategoryRecord(categoryIdentifier: string) {

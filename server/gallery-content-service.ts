@@ -65,6 +65,39 @@ function normalizeImageAsset(value: unknown, fallbackTitle: string, index: numbe
   };
 }
 
+function normalizeRank(value: unknown, fallback: number) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed) {
+      const parsed = Number(trimmed);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return fallback;
+}
+
+function compareRankedByName(
+  left: { rank?: unknown; name?: unknown },
+  right: { rank?: unknown; name?: unknown },
+) {
+  const leftRank = normalizeRank(left.rank, Number.MAX_SAFE_INTEGER);
+  const rightRank = normalizeRank(right.rank, Number.MAX_SAFE_INTEGER);
+  if (leftRank !== rightRank) {
+    return leftRank - rightRank;
+  }
+
+  const leftName = typeof left.name === 'string' ? left.name : '';
+  const rightName = typeof right.name === 'string' ? right.name : '';
+  return leftName.localeCompare(rightName);
+}
+
 function normalizePiece(value: unknown): GalleryPiece | null {
   if (!value || typeof value !== 'object') {
     return null;
@@ -168,24 +201,46 @@ async function getGallerySettings() {
 
 async function getRankedGalleryCategoriesAndPieces() {
   const [categoryDocs, subcategoryDocs, itemDocs] = await Promise.all([
-    GalleryCategoryRecordModel.find({}).sort({ rank: 1, name: 1 }).lean(),
-    GallerySubcategoryRecordModel.find({}).sort({ categoryKey: 1, rank: 1, name: 1 }).lean(),
-    GalleryItemRecordModel.find({}).sort({ categoryKey: 1, subcategoryKey: 1, rank: 1, title: 1 }).lean(),
+    GalleryCategoryRecordModel.find({}).lean(),
+    GallerySubcategoryRecordModel.find({}).lean(),
+    GalleryItemRecordModel.find({}).lean(),
   ]);
 
+  const rankedCategories = [...categoryDocs]
+    .map((categoryDoc, index) => ({
+      ...categoryDoc,
+      rank: normalizeRank(categoryDoc.rank, index),
+    }))
+    .sort(compareRankedByName);
+
+  const rankedSubcategories = [...subcategoryDocs]
+    .map((subcategoryDoc, index) => ({
+      ...subcategoryDoc,
+      rank: normalizeRank(subcategoryDoc.rank, index),
+    }))
+    .sort((left, right) => {
+      if (left.categoryKey !== right.categoryKey) {
+        const leftCategoryIndex = rankedCategories.findIndex((category) => category.key === left.categoryKey);
+        const rightCategoryIndex = rankedCategories.findIndex((category) => category.key === right.categoryKey);
+        return leftCategoryIndex - rightCategoryIndex;
+      }
+
+      return compareRankedByName(left, right);
+    });
+
   const subcategoriesByCategoryKey = new Map<string, string[]>();
-  subcategoryDocs.forEach((subcategoryDoc) => {
+  rankedSubcategories.forEach((subcategoryDoc) => {
     const existing = subcategoriesByCategoryKey.get(subcategoryDoc.categoryKey) ?? [];
     existing.push(subcategoryDoc.name);
     subcategoriesByCategoryKey.set(subcategoryDoc.categoryKey, existing);
   });
 
-  const categories: GalleryCategoryDefinition[] = categoryDocs.map((categoryDoc) => ({
+  const categories: GalleryCategoryDefinition[] = rankedCategories.map((categoryDoc) => ({
     name: categoryDoc.name,
     eyebrow: categoryDoc.eyebrow,
     description: categoryDoc.description,
     subcategories: subcategoriesByCategoryKey.get(categoryDoc.key) ?? [],
-    rank: categoryDoc.rank,
+    rank: normalizeRank(categoryDoc.rank, Number.MAX_SAFE_INTEGER),
   }));
 
   const pieces = itemDocs

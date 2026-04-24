@@ -183,50 +183,44 @@ test('getGalleryContent builds content from gallery settings and ranked records'
   });
 
   (GalleryCategoryRecordModel as unknown as { find: typeof GalleryCategoryRecordModel.find }).find = (() => ({
-    sort: () => ({
-      lean: async () => [
-        {
-          key: 'living-room',
-          name: 'Living Room',
-          eyebrow: 'Gallery I',
-          description: 'Living room description',
-          rank: 0,
-        },
-      ],
-    }),
+    lean: async () => [
+      {
+        key: 'living-room',
+        name: 'Living Room',
+        eyebrow: 'Gallery I',
+        description: 'Living room description',
+        rank: 0,
+      },
+    ],
   })) as typeof GalleryCategoryRecordModel.find;
 
   (GallerySubcategoryRecordModel as unknown as { find: typeof GallerySubcategoryRecordModel.find }).find = (() => ({
-    sort: () => ({
-      lean: async () => [
-        {
-          key: 'living-room:tables',
-          name: 'Tables',
-          categoryKey: 'living-room',
-          rank: 0,
-        },
-      ],
-    }),
+    lean: async () => [
+      {
+        key: 'living-room:tables',
+        name: 'Tables',
+        categoryKey: 'living-room',
+        rank: 0,
+      },
+    ],
   })) as typeof GallerySubcategoryRecordModel.find;
 
   (GalleryItemRecordModel as unknown as { find: typeof GalleryItemRecordModel.find }).find = (() => ({
-    sort: () => ({
-      lean: async () => [
-        {
-          key: 'coffee-table',
-          title: 'Coffee Table',
-          categoryName: 'Living Room',
-          subcategoryName: 'Tables',
-          material: 'Walnut',
-          note: 'Studio note',
-          archiveCount: 1,
-          featured: true,
-          rank: 0,
-          image: { src: '/uploads/coffee.jpg', alt: 'Coffee table' },
-          images: [{ src: '/uploads/coffee.jpg', alt: 'Coffee table' }],
-        },
-      ],
-    }),
+    lean: async () => [
+      {
+        key: 'coffee-table',
+        title: 'Coffee Table',
+        categoryName: 'Living Room',
+        subcategoryName: 'Tables',
+        material: 'Walnut',
+        note: 'Studio note',
+        archiveCount: 1,
+        featured: true,
+        rank: 0,
+        image: { src: '/uploads/coffee.jpg', alt: 'Coffee table' },
+        images: [{ src: '/uploads/coffee.jpg', alt: 'Coffee table' }],
+      },
+    ],
   })) as typeof GalleryItemRecordModel.find;
 
   try {
@@ -300,36 +294,32 @@ test('upsertGalleryContent persists settings and syncs ranked category/item reco
     }),
   }) as ReturnType<typeof GalleryContentModel.findOne>;
   (GalleryCategoryRecordModel as unknown as { find: typeof GalleryCategoryRecordModel.find }).find = (() => ({
-    sort: () => ({ lean: async () => input.categories }),
+    lean: async () => input.categories,
   })) as typeof GalleryCategoryRecordModel.find;
   (GallerySubcategoryRecordModel as unknown as { find: typeof GallerySubcategoryRecordModel.find }).find = (() => ({
-    sort: () => ({
-      lean: async () => input.categories.flatMap((category) =>
-        category.subcategories.map((subcategory, rank) => ({
-          key: `${category.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}:${subcategory.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`,
-          name: subcategory,
-          categoryKey: category.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
-          rank,
-        }))
-      ),
-    }),
+    lean: async () => input.categories.flatMap((category) =>
+      category.subcategories.map((subcategory, rank) => ({
+        key: `${category.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}:${subcategory.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`,
+        name: subcategory,
+        categoryKey: category.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+        rank,
+      }))
+    ),
   })) as typeof GallerySubcategoryRecordModel.find;
   (GalleryItemRecordModel as unknown as { find: typeof GalleryItemRecordModel.find }).find = (() => ({
-    sort: () => ({
-      lean: async () => input.pieces.map((piece, rank) => ({
-        key: piece.id,
-        title: piece.title,
-        categoryName: piece.category,
-        subcategoryName: piece.subcategory,
-        material: piece.material,
-        note: piece.note,
-        archiveCount: piece.archiveCount,
-        featured: piece.featured,
-        rank,
-        image: piece.image,
-        images: piece.images,
-      })),
-    }),
+    lean: async () => input.pieces.map((piece, rank) => ({
+      key: piece.id,
+      title: piece.title,
+      categoryName: piece.category,
+      subcategoryName: piece.subcategory,
+      material: piece.material,
+      note: piece.note,
+      archiveCount: piece.archiveCount,
+      featured: piece.featured,
+      rank,
+      image: piece.image,
+      images: piece.images,
+    })),
   })) as typeof GalleryItemRecordModel.find;
 
   try {

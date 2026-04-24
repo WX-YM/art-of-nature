@@ -51,6 +51,7 @@ import {
   deleteGalleryCategoryRecord,
   getRankedGalleryCategories,
   seedStructuredContent,
+  upsertGalleryCategoryStructure,
   upsertGalleryCategoryRecord,
 } from './structured-content-service';
 
@@ -155,6 +156,31 @@ function getGoogleOAuthRedirectUri(req: express.Request) {
 
 function slugifyEditorValue(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function parseIntegerField(body: unknown, fieldName: string, fallback: number = 0) {
+  if (!body || typeof body !== 'object') {
+    return fallback;
+  }
+
+  const raw = (body as Record<string, unknown>)[fieldName];
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return Math.trunc(raw);
+  }
+
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return fallback;
+    }
+
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) {
+      return Math.trunc(parsed);
+    }
+  }
+
+  return fallback;
 }
 
 function isUploadClientErrorMessage(message: string) {
@@ -1422,11 +1448,25 @@ app.get('/admin', async (req, res, next) => {
               .map(
                 (category) => `<div class="gallery-category-card">
                   <p class="admin-eyebrow" style="margin-top:0;">${escapeHtml(category.name)}</p>
+                  <p><label>Rank<br /><input type="number" name="galleryRank:${escapeHtml(category.name)}" value="${escapeHtml(String(category.rank ?? 0))}" /></label></p>
                   <p><label>Eyebrow<br /><input name="galleryEyebrow:${escapeHtml(category.name)}" required value="${escapeHtml(category.eyebrow)}" /></label></p>
                   <p><label>Description<br /><textarea name="galleryDescription:${escapeHtml(category.name)}" required style="min-height:110px;">${escapeHtml(category.description)}</textarea></label></p>
                 </div>`
               )
               .join('')}
+          </div>
+
+          <div class="panel-surface" style="margin-top:1.2rem; padding:1rem 1.1rem;">
+            <p class="admin-eyebrow" style="margin-top:0;">Add Category</p>
+            <p class="section-intro" style="margin-top:0.35rem;">Create a new gallery room/category and set its display rank. Subcategories are optional now and can be refined afterward.</p>
+            <div class="section-grid two">
+              <p><label>Name<br /><input name="newGalleryCategoryName" placeholder="e.g. Studio Pieces" /></label></p>
+              <p><label>Rank<br /><input type="number" name="newGalleryCategoryRank" value="${escapeHtml(String(gallery.categories.length))}" /></label></p>
+              <p><label>Eyebrow<br /><input name="newGalleryCategoryEyebrow" placeholder="e.g. Gallery VII" /></label></p>
+              <p><label>Subcategories<br /><textarea name="newGalleryCategorySubcategories" placeholder="One subcategory per line" style="min-height:110px;"></textarea></label></p>
+              <p class="full" style="grid-column:1 / -1;"><label>Description<br /><textarea name="newGalleryCategoryDescription" placeholder="Describe the mood and purpose of this category." style="min-height:110px;"></textarea></label></p>
+            </div>
+            <p class="upload-help" style="margin:0.65rem 0 0;">Leave the fields empty if you are only editing the existing categories above. Fill them in to add a new category during this save.</p>
           </div>
 
           <div class="gallery-editor-toolbar">
@@ -3594,6 +3634,27 @@ app.post('/admin/content/gallery', async (req, res, next) => {
 
     const currentGallery = await getGalleryContent();
 
+    const newCategoryName = typeof req.body?.newGalleryCategoryName === 'string'
+      ? req.body.newGalleryCategoryName.trim()
+      : '';
+    const categories = currentGallery.categories.map((category) => ({
+      name: category.name,
+      eyebrow: parseRequiredStringField(req.body, `galleryEyebrow:${category.name}`, 120),
+      description: parseRequiredStringField(req.body, `galleryDescription:${category.name}`, 3000),
+      subcategories: category.subcategories,
+      rank: parseIntegerField(req.body, `galleryRank:${category.name}`, category.rank ?? 0),
+    }));
+
+    if (newCategoryName) {
+      categories.push({
+        name: parseRequiredStringField(req.body, 'newGalleryCategoryName', 120),
+        eyebrow: parseRequiredStringField(req.body, 'newGalleryCategoryEyebrow', 120),
+        description: parseRequiredStringField(req.body, 'newGalleryCategoryDescription', 3000),
+        subcategories: parseMultilineField(req.body, 'newGalleryCategorySubcategories'),
+        rank: parseIntegerField(req.body, 'newGalleryCategoryRank', currentGallery.categories.length),
+      });
+    }
+
     const content: GalleryContent = normalizeGalleryContent({
       previewEyebrow: parseRequiredStringField(req.body, 'previewEyebrow', 120),
       previewHeading: parseRequiredStringField(req.body, 'previewHeading', 200),
@@ -3601,13 +3662,7 @@ app.post('/admin/content/gallery', async (req, res, next) => {
       pageEyebrow: parseRequiredStringField(req.body, 'pageEyebrow', 120),
       pageHeading: parseRequiredStringField(req.body, 'pageHeading', 220),
       pageDescription: parseRequiredStringField(req.body, 'pageDescription', 3000),
-      categories: currentGallery.categories.map((category) => ({
-        name: category.name,
-        eyebrow: parseRequiredStringField(req.body, `galleryEyebrow:${category.name}`, 120),
-        description: parseRequiredStringField(req.body, `galleryDescription:${category.name}`, 3000),
-        subcategories: category.subcategories,
-        rank: category.rank,
-      })),
+      categories,
       pieces,
     });
 
@@ -4153,7 +4208,11 @@ app.put('/api/gallery/categories', async (req, res, next) => {
       return;
     }
 
-    const saved = await upsertGalleryCategoryRecord(req.body);
+    const payload = req.body as { subcategories?: unknown };
+    const saved = Array.isArray(payload?.subcategories)
+      ? await upsertGalleryCategoryStructure(req.body)
+      : await upsertGalleryCategoryRecord(req.body);
+    invalidatePageCache();
     res.json(saved);
   } catch (error) {
     if (error instanceof Error && error.message === 'Invalid category payload.') {
@@ -4174,6 +4233,7 @@ app.delete('/api/gallery/categories/:categoryId', async (req, res, next) => {
     }
 
     const deleted = await deleteGalleryCategoryRecord(req.params.categoryId);
+    invalidatePageCache();
     res.json({ deleted });
   } catch (error) {
     if (error instanceof Error && error.message === 'Category not found.') {
