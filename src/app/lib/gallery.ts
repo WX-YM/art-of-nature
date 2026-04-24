@@ -18,6 +18,7 @@ export type GalleryPiece = {
   note: string;
   archiveCount: number;
   featured?: boolean;
+  rank?: number;
   image: GalleryImageAsset;
   images: GalleryImageAsset[];
 };
@@ -39,6 +40,7 @@ export type GalleryCategoryDefinition = {
   eyebrow: string;
   description: string;
   subcategories: GallerySubcategoryName[];
+  rank?: number;
 };
 
 export type GalleryContent = {
@@ -1401,6 +1403,10 @@ function sortGalleryPieces(pieces: GalleryPiece[], categoryOrder: string[] = def
 
     if (left.subcategory !== right.subcategory) {
       return left.subcategory.localeCompare(right.subcategory);
+    }
+
+    if ((left.rank ?? 0) !== (right.rank ?? 0)) {
+      return (left.rank ?? 0) - (right.rank ?? 0);
     }
 
     return left.title.localeCompare(right.title);

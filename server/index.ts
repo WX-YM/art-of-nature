@@ -9,7 +9,7 @@ import { getHeroContent, upsertHeroContent } from './hero-content-service';
 import { getGalleryContent, normalizeGalleryContent, upsertGalleryContent } from './gallery-content-service';
 import { getJournalContent, normalizeJournalContent, upsertJournalContent } from './journal-content-service';
 import { render as renderApp } from '../src/entry-server';
-import { defaultGalleryContent, type GalleryContent, type GalleryPiece } from '../src/app/lib/gallery';
+import { type GalleryContent, type GalleryPiece } from '../src/app/lib/gallery';
 import { defaultHeroContent, type HeroContent } from '../src/app/lib/heroContent';
 import { getAboutContent, upsertAboutContent } from './about-content-service';
 import { defaultAboutContent, type AboutContent } from '../src/app/lib/aboutContent';
@@ -18,7 +18,6 @@ import { defaultContactContent, type ContactContent } from '../src/app/lib/conta
 import { getCraftsmanshipContent, upsertCraftsmanshipContent } from './craftsmanship-content-service';
 import { defaultCraftsmanshipContent, type CraftsmanshipContent } from '../src/app/lib/craftsmanshipContent';
 import {
-  defaultJournalContent,
   getJournalPostBySlug,
   getPublishedJournalPosts,
   slugifyJournalValue,
@@ -51,6 +50,7 @@ import {
 import {
   deleteGalleryCategoryRecord,
   getRankedGalleryCategories,
+  seedStructuredContent,
   upsertGalleryCategoryRecord,
 } from './structured-content-service';
 
@@ -3592,6 +3592,8 @@ app.post('/admin/content/gallery', async (req, res, next) => {
       return;
     }
 
+    const currentGallery = await getGalleryContent();
+
     const content: GalleryContent = normalizeGalleryContent({
       previewEyebrow: parseRequiredStringField(req.body, 'previewEyebrow', 120),
       previewHeading: parseRequiredStringField(req.body, 'previewHeading', 200),
@@ -3599,11 +3601,12 @@ app.post('/admin/content/gallery', async (req, res, next) => {
       pageEyebrow: parseRequiredStringField(req.body, 'pageEyebrow', 120),
       pageHeading: parseRequiredStringField(req.body, 'pageHeading', 220),
       pageDescription: parseRequiredStringField(req.body, 'pageDescription', 3000),
-      categories: defaultGalleryContent.categories.map((category) => ({
+      categories: currentGallery.categories.map((category) => ({
         name: category.name,
         eyebrow: parseRequiredStringField(req.body, `galleryEyebrow:${category.name}`, 120),
         description: parseRequiredStringField(req.body, `galleryDescription:${category.name}`, 3000),
         subcategories: category.subcategories,
+        rank: category.rank,
       })),
       pieces,
     });
@@ -3753,14 +3756,7 @@ app.post('/admin/content/reset', async (req, res, next) => {
       return;
     }
 
-    await Promise.all([
-      upsertHeroContent(defaultHeroContent),
-      upsertAboutContent(defaultAboutContent),
-      upsertGalleryContent(defaultGalleryContent),
-      upsertJournalContent(defaultJournalContent),
-      upsertContactContent(defaultContactContent),
-      upsertCraftsmanshipContent(defaultCraftsmanshipContent),
-    ]);
+    await seedStructuredContent({ reset: true, syncLegacyContent: true });
 
     invalidatePageCache();
     res.redirect(303, '/admin?status=reset');

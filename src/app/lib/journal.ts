@@ -7,6 +7,7 @@ export type JournalPost = {
   publishedAt: string;
   featured?: boolean;
   published: boolean;
+  rank?: number;
   coverImageUrl: string;
   coverImageAlt: string;
   galleryImageUrls: string[];
@@ -160,6 +161,10 @@ export function getPublishedJournalPosts(content: JournalContent) {
   return [...content.posts]
     .filter((post) => post.published)
     .sort((left, right) => {
+      if ((left.rank ?? 0) !== (right.rank ?? 0)) {
+        return (left.rank ?? 0) - (right.rank ?? 0);
+      }
+
       if (left.publishedAt === right.publishedAt) {
         return left.title.localeCompare(right.title);
       }

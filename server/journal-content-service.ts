@@ -1,15 +1,30 @@
 import {
-  defaultJournalContent,
   slugifyJournalValue,
   type JournalContent,
   type JournalPost,
 } from '../src/app/lib/journal';
 import { JournalContentModel } from './models/JournalContent';
+import { JournalPostRecordModel } from './models/JournalPostRecord';
 
 const JOURNAL_KEY = 'primary-journal';
 
-type JournalContentDocument = JournalContent & {
+const journalSettingsFallback = {
+  previewEyebrow: 'Insights',
+  previewHeading: 'Journal',
+  previewDescription: 'Material notes, process observations, and studio writing.',
+  pageEyebrow: 'Journal',
+  pageHeading: 'Studio Notes',
+  pageDescription: 'A slower record of timber, craft, and the decisions behind each piece.',
+};
+
+type JournalContentDocument = {
   key: string;
+  previewEyebrow?: string;
+  previewHeading?: string;
+  previewDescription?: string;
+  pageEyebrow?: string;
+  pageHeading?: string;
+  pageDescription?: string;
 };
 
 function normalizeText(value: unknown, fallback: string, maxLength: number) {
@@ -83,11 +98,80 @@ function normalizePost(value: unknown): JournalPost | null {
     publishedAt: normalizeDate(raw.publishedAt, new Date().toISOString().slice(0, 10)),
     featured: raw.featured === true,
     published: raw.published !== false,
+    rank: typeof raw.rank === 'number' && Number.isFinite(raw.rank) ? raw.rank : 0,
     coverImageUrl,
     coverImageAlt,
     galleryImageUrls: uniqueGalleryImageUrls,
     body,
   };
+}
+
+async function getJournalSettings() {
+  const doc = await JournalContentModel.findOne<JournalContentDocument>({ key: JOURNAL_KEY }).lean();
+
+  return {
+    previewEyebrow: normalizeText(doc?.previewEyebrow, journalSettingsFallback.previewEyebrow, 120),
+    previewHeading: normalizeText(doc?.previewHeading, journalSettingsFallback.previewHeading, 200),
+    previewDescription: normalizeText(doc?.previewDescription, journalSettingsFallback.previewDescription, 3000),
+    pageEyebrow: normalizeText(doc?.pageEyebrow, journalSettingsFallback.pageEyebrow, 120),
+    pageHeading: normalizeText(doc?.pageHeading, journalSettingsFallback.pageHeading, 220),
+    pageDescription: normalizeText(doc?.pageDescription, journalSettingsFallback.pageDescription, 4000),
+  };
+}
+
+async function getRankedJournalPosts() {
+  const postDocs = await JournalPostRecordModel.find({}).sort({ rank: 1, publishedAt: -1, title: 1 }).lean();
+  return postDocs
+    .map((postDoc) =>
+      normalizePost({
+        id: postDoc.key,
+        slug: postDoc.slug,
+        title: postDoc.title,
+        excerpt: postDoc.excerpt,
+        category: postDoc.category,
+        publishedAt: postDoc.publishedAt,
+        featured: postDoc.featured,
+        published: postDoc.published,
+        rank: postDoc.rank,
+        coverImageUrl: postDoc.coverImageUrl,
+        coverImageAlt: postDoc.coverImageAlt,
+        galleryImageUrls: postDoc.galleryImageUrls,
+        body: postDoc.body,
+      })
+    )
+    .filter((post): post is JournalPost => post !== null);
+}
+
+async function syncJournalPostRecords(content: JournalContent) {
+  const posts = content.posts.map((post, rank) => ({
+    key: post.id || post.slug,
+    slug: post.slug,
+    title: post.title,
+    excerpt: post.excerpt,
+    category: post.category,
+    publishedAt: post.publishedAt,
+    featured: post.featured === true,
+    published: post.published !== false,
+    rank: post.rank ?? rank,
+    coverImageUrl: post.coverImageUrl,
+    coverImageAlt: post.coverImageAlt,
+    galleryImageUrls: post.galleryImageUrls,
+    body: post.body,
+  }));
+
+  const postKeys = new Set(posts.map((post) => post.key));
+
+  await Promise.all(
+    posts.map((post) =>
+      JournalPostRecordModel.findOneAndUpdate({ key: post.key }, post, {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      })
+    )
+  );
+
+  await JournalPostRecordModel.deleteMany({ key: { $nin: Array.from(postKeys) } });
 }
 
 export function normalizeJournalContent(content: unknown): JournalContent {
@@ -99,24 +183,23 @@ export function normalizeJournalContent(content: unknown): JournalContent {
     : [];
 
   return {
-    previewEyebrow: normalizeText(raw.previewEyebrow, defaultJournalContent.previewEyebrow, 120),
-    previewHeading: normalizeText(raw.previewHeading, defaultJournalContent.previewHeading, 200),
-    previewDescription: normalizeText(raw.previewDescription, defaultJournalContent.previewDescription, 3000),
-    pageEyebrow: normalizeText(raw.pageEyebrow, defaultJournalContent.pageEyebrow, 120),
-    pageHeading: normalizeText(raw.pageHeading, defaultJournalContent.pageHeading, 220),
-    pageDescription: normalizeText(raw.pageDescription, defaultJournalContent.pageDescription, 4000),
-    posts: posts.length > 0 ? posts : defaultJournalContent.posts,
+    previewEyebrow: normalizeText(raw.previewEyebrow, journalSettingsFallback.previewEyebrow, 120),
+    previewHeading: normalizeText(raw.previewHeading, journalSettingsFallback.previewHeading, 200),
+    previewDescription: normalizeText(raw.previewDescription, journalSettingsFallback.previewDescription, 3000),
+    pageEyebrow: normalizeText(raw.pageEyebrow, journalSettingsFallback.pageEyebrow, 120),
+    pageHeading: normalizeText(raw.pageHeading, journalSettingsFallback.pageHeading, 220),
+    pageDescription: normalizeText(raw.pageDescription, journalSettingsFallback.pageDescription, 4000),
+    posts,
   };
 }
 
 export async function getJournalContent(): Promise<JournalContent> {
-  const doc = await JournalContentModel.findOne<JournalContentDocument>({ key: JOURNAL_KEY }).lean();
+  const [settings, posts] = await Promise.all([getJournalSettings(), getRankedJournalPosts()]);
 
-  if (!doc) {
-    return normalizeJournalContent(defaultJournalContent);
-  }
-
-  return normalizeJournalContent(doc);
+  return {
+    ...settings,
+    posts,
+  };
 }
 
 export async function upsertJournalContent(content: unknown): Promise<JournalContent> {
@@ -124,9 +207,19 @@ export async function upsertJournalContent(content: unknown): Promise<JournalCon
 
   await JournalContentModel.findOneAndUpdate(
     { key: JOURNAL_KEY },
-    { ...normalized, key: JOURNAL_KEY },
+    {
+      key: JOURNAL_KEY,
+      previewEyebrow: normalized.previewEyebrow,
+      previewHeading: normalized.previewHeading,
+      previewDescription: normalized.previewDescription,
+      pageEyebrow: normalized.pageEyebrow,
+      pageHeading: normalized.pageHeading,
+      pageDescription: normalized.pageDescription,
+    },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
-  return normalized;
+  await syncJournalPostRecords(normalized);
+
+  return getJournalContent();
 }

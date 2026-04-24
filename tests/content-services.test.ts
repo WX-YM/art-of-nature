@@ -11,6 +11,10 @@ import { HeroContentModel } from '../server/models/HeroContent';
 import { AboutContentModel } from '../server/models/AboutContent';
 import { GalleryContentModel } from '../server/models/GalleryContent';
 import { JournalContentModel } from '../server/models/JournalContent';
+import { GalleryCategoryRecordModel } from '../server/models/GalleryCategoryRecord';
+import { GallerySubcategoryRecordModel } from '../server/models/GallerySubcategoryRecord';
+import { GalleryItemRecordModel } from '../server/models/GalleryItemRecord';
+import { JournalPostRecordModel } from '../server/models/JournalPostRecord';
 import { ContactContentModel } from '../server/models/ContactContent';
 import { CraftsmanshipContentModel } from '../server/models/CraftsmanshipContent';
 import { ContactMessageModel } from '../server/models/ContactMessage';
@@ -160,23 +164,105 @@ test('upsertAboutContent persists with fixed key and returns input', async () =>
   }
 });
 
-test('getGalleryContent returns defaults when no document exists', async () => {
+test('getGalleryContent builds content from gallery settings and ranked records', async () => {
   const originalFindOne = GalleryContentModel.findOne;
+  const originalFindCategories = GalleryCategoryRecordModel.find;
+  const originalFindSubcategories = GallerySubcategoryRecordModel.find;
+  const originalFindItems = GalleryItemRecordModel.find;
 
   (GalleryContentModel as unknown as { findOne: () => { lean: () => Promise<unknown> } }).findOne = () => ({
-    lean: async () => null,
+    lean: async () => ({
+      key: 'primary-gallery',
+      previewEyebrow: 'Gallery',
+      previewHeading: 'Curated Work',
+      previewDescription: 'Preview description',
+      pageEyebrow: 'Archive',
+      pageHeading: 'Gallery Heading',
+      pageDescription: 'Page description',
+    }),
   });
+
+  (GalleryCategoryRecordModel as unknown as { find: typeof GalleryCategoryRecordModel.find }).find = (() => ({
+    sort: () => ({
+      lean: async () => [
+        {
+          key: 'living-room',
+          name: 'Living Room',
+          eyebrow: 'Gallery I',
+          description: 'Living room description',
+          rank: 0,
+        },
+      ],
+    }),
+  })) as typeof GalleryCategoryRecordModel.find;
+
+  (GallerySubcategoryRecordModel as unknown as { find: typeof GallerySubcategoryRecordModel.find }).find = (() => ({
+    sort: () => ({
+      lean: async () => [
+        {
+          key: 'living-room:tables',
+          name: 'Tables',
+          categoryKey: 'living-room',
+          rank: 0,
+        },
+      ],
+    }),
+  })) as typeof GallerySubcategoryRecordModel.find;
+
+  (GalleryItemRecordModel as unknown as { find: typeof GalleryItemRecordModel.find }).find = (() => ({
+    sort: () => ({
+      lean: async () => [
+        {
+          key: 'coffee-table',
+          title: 'Coffee Table',
+          categoryName: 'Living Room',
+          subcategoryName: 'Tables',
+          material: 'Walnut',
+          note: 'Studio note',
+          archiveCount: 1,
+          featured: true,
+          rank: 0,
+          image: { src: '/uploads/coffee.jpg', alt: 'Coffee table' },
+          images: [{ src: '/uploads/coffee.jpg', alt: 'Coffee table' }],
+        },
+      ],
+    }),
+  })) as typeof GalleryItemRecordModel.find;
 
   try {
     const content = await getGalleryContent();
-    assert.deepEqual(content, defaultGalleryContent);
+    assert.equal(content.previewHeading, 'Curated Work');
+    assert.equal(content.categories.length, 1);
+    assert.equal(content.categories[0].name, 'Living Room');
+    assert.deepEqual(content.categories[0].subcategories, ['Tables']);
+    assert.equal(content.pieces.length, 1);
+    assert.equal(content.pieces[0].title, 'Coffee Table');
+    assert.equal(content.pieces[0].rank, 0);
   } finally {
     (GalleryContentModel as unknown as { findOne: typeof GalleryContentModel.findOne }).findOne = originalFindOne;
+    (GalleryCategoryRecordModel as unknown as { find: typeof GalleryCategoryRecordModel.find }).find = originalFindCategories;
+    (GallerySubcategoryRecordModel as unknown as { find: typeof GallerySubcategoryRecordModel.find }).find = originalFindSubcategories;
+    (GalleryItemRecordModel as unknown as { find: typeof GalleryItemRecordModel.find }).find = originalFindItems;
   }
 });
 
-test('upsertGalleryContent persists with fixed key and returns normalized input', async () => {
+test('upsertGalleryContent persists settings and syncs ranked category/item records', async () => {
   const originalFindOneAndUpdate = GalleryContentModel.findOneAndUpdate;
+  const originalCategoryFindOneAndUpdate = GalleryCategoryRecordModel.findOneAndUpdate;
+  const originalSubcategoryFindOneAndUpdate = GallerySubcategoryRecordModel.findOneAndUpdate;
+  const originalItemFindOneAndUpdate = GalleryItemRecordModel.findOneAndUpdate;
+  const originalCategoryDeleteMany = GalleryCategoryRecordModel.deleteMany;
+  const originalSubcategoryDeleteMany = GallerySubcategoryRecordModel.deleteMany;
+  const originalItemDeleteMany = GalleryItemRecordModel.deleteMany;
+  const originalFindOne = GalleryContentModel.findOne;
+  const originalFindCategories = GalleryCategoryRecordModel.find;
+  const originalFindSubcategories = GallerySubcategoryRecordModel.find;
+  const originalFindItems = GalleryItemRecordModel.find;
+  const input = {
+    ...defaultGalleryContent,
+    previewHeading: 'Edited Gallery Heading',
+    pieces: defaultGalleryContent.pieces.slice(0, 2),
+  };
 
   (GalleryContentModel as unknown as { findOneAndUpdate: (...args: unknown[]) => Promise<unknown> }).findOneAndUpdate = (
     filter: unknown,
@@ -189,11 +275,62 @@ test('upsertGalleryContent persists with fixed key and returns normalized input'
     return Promise.resolve(null);
   };
 
-  const input = {
-    ...defaultGalleryContent,
-    previewHeading: 'Edited Gallery Heading',
-    pieces: defaultGalleryContent.pieces.slice(0, 2),
-  };
+  (GalleryCategoryRecordModel as unknown as { findOneAndUpdate: typeof GalleryCategoryRecordModel.findOneAndUpdate }).findOneAndUpdate =
+    (() => Promise.resolve(null)) as typeof GalleryCategoryRecordModel.findOneAndUpdate;
+  (GallerySubcategoryRecordModel as unknown as { findOneAndUpdate: typeof GallerySubcategoryRecordModel.findOneAndUpdate }).findOneAndUpdate =
+    (() => Promise.resolve(null)) as typeof GallerySubcategoryRecordModel.findOneAndUpdate;
+  (GalleryItemRecordModel as unknown as { findOneAndUpdate: typeof GalleryItemRecordModel.findOneAndUpdate }).findOneAndUpdate =
+    (() => Promise.resolve(null)) as typeof GalleryItemRecordModel.findOneAndUpdate;
+  (GalleryCategoryRecordModel as unknown as { deleteMany: typeof GalleryCategoryRecordModel.deleteMany }).deleteMany =
+    (() => Promise.resolve(null)) as typeof GalleryCategoryRecordModel.deleteMany;
+  (GallerySubcategoryRecordModel as unknown as { deleteMany: typeof GallerySubcategoryRecordModel.deleteMany }).deleteMany =
+    (() => Promise.resolve(null)) as typeof GallerySubcategoryRecordModel.deleteMany;
+  (GalleryItemRecordModel as unknown as { deleteMany: typeof GalleryItemRecordModel.deleteMany }).deleteMany =
+    (() => Promise.resolve(null)) as typeof GalleryItemRecordModel.deleteMany;
+
+  (GalleryContentModel as unknown as { findOne: typeof GalleryContentModel.findOne }).findOne = () => ({
+    lean: async () => ({
+      key: 'primary-gallery',
+      previewEyebrow: 'Preview',
+      previewHeading: 'Edited Gallery Heading',
+      previewDescription: 'Description',
+      pageEyebrow: 'Page',
+      pageHeading: 'Heading',
+      pageDescription: 'Page description',
+    }),
+  }) as ReturnType<typeof GalleryContentModel.findOne>;
+  (GalleryCategoryRecordModel as unknown as { find: typeof GalleryCategoryRecordModel.find }).find = (() => ({
+    sort: () => ({ lean: async () => input.categories }),
+  })) as typeof GalleryCategoryRecordModel.find;
+  (GallerySubcategoryRecordModel as unknown as { find: typeof GallerySubcategoryRecordModel.find }).find = (() => ({
+    sort: () => ({
+      lean: async () => input.categories.flatMap((category) =>
+        category.subcategories.map((subcategory, rank) => ({
+          key: `${category.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}:${subcategory.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`,
+          name: subcategory,
+          categoryKey: category.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+          rank,
+        }))
+      ),
+    }),
+  })) as typeof GallerySubcategoryRecordModel.find;
+  (GalleryItemRecordModel as unknown as { find: typeof GalleryItemRecordModel.find }).find = (() => ({
+    sort: () => ({
+      lean: async () => input.pieces.map((piece, rank) => ({
+        key: piece.id,
+        title: piece.title,
+        categoryName: piece.category,
+        subcategoryName: piece.subcategory,
+        material: piece.material,
+        note: piece.note,
+        archiveCount: piece.archiveCount,
+        featured: piece.featured,
+        rank,
+        image: piece.image,
+        images: piece.images,
+      })),
+    }),
+  })) as typeof GalleryItemRecordModel.find;
 
   try {
     const saved = await upsertGalleryContent(input);
@@ -202,26 +339,80 @@ test('upsertGalleryContent persists with fixed key and returns normalized input'
   } finally {
     (GalleryContentModel as unknown as { findOneAndUpdate: typeof GalleryContentModel.findOneAndUpdate }).findOneAndUpdate =
       originalFindOneAndUpdate;
+    (GalleryCategoryRecordModel as unknown as { findOneAndUpdate: typeof GalleryCategoryRecordModel.findOneAndUpdate }).findOneAndUpdate = originalCategoryFindOneAndUpdate;
+    (GallerySubcategoryRecordModel as unknown as { findOneAndUpdate: typeof GallerySubcategoryRecordModel.findOneAndUpdate }).findOneAndUpdate = originalSubcategoryFindOneAndUpdate;
+    (GalleryItemRecordModel as unknown as { findOneAndUpdate: typeof GalleryItemRecordModel.findOneAndUpdate }).findOneAndUpdate = originalItemFindOneAndUpdate;
+    (GalleryCategoryRecordModel as unknown as { deleteMany: typeof GalleryCategoryRecordModel.deleteMany }).deleteMany = originalCategoryDeleteMany;
+    (GallerySubcategoryRecordModel as unknown as { deleteMany: typeof GallerySubcategoryRecordModel.deleteMany }).deleteMany = originalSubcategoryDeleteMany;
+    (GalleryItemRecordModel as unknown as { deleteMany: typeof GalleryItemRecordModel.deleteMany }).deleteMany = originalItemDeleteMany;
+    (GalleryContentModel as unknown as { findOne: typeof GalleryContentModel.findOne }).findOne = originalFindOne;
+    (GalleryCategoryRecordModel as unknown as { find: typeof GalleryCategoryRecordModel.find }).find = originalFindCategories;
+    (GallerySubcategoryRecordModel as unknown as { find: typeof GallerySubcategoryRecordModel.find }).find = originalFindSubcategories;
+    (GalleryItemRecordModel as unknown as { find: typeof GalleryItemRecordModel.find }).find = originalFindItems;
   }
 });
 
-test('getJournalContent returns defaults when no document exists', async () => {
+test('getJournalContent builds content from journal settings and post records', async () => {
   const originalFindOne = JournalContentModel.findOne;
+  const originalFindPosts = JournalPostRecordModel.find;
 
   (JournalContentModel as unknown as { findOne: () => { lean: () => Promise<unknown> } }).findOne = () => ({
-    lean: async () => null,
+    lean: async () => ({
+      key: 'primary-journal',
+      previewEyebrow: 'Insights',
+      previewHeading: 'Edited Journal',
+      previewDescription: 'Preview copy',
+      pageEyebrow: 'Journal',
+      pageHeading: 'Page heading',
+      pageDescription: 'Page description',
+    }),
   });
+
+  (JournalPostRecordModel as unknown as { find: typeof JournalPostRecordModel.find }).find = (() => ({
+    sort: () => ({
+      lean: async () => [
+        {
+          key: 'wood-selection',
+          slug: 'wood-selection',
+          title: 'Wood Selection',
+          excerpt: 'Excerpt',
+          category: 'Materials',
+          publishedAt: '2026-04-15',
+          featured: true,
+          published: true,
+          rank: 0,
+          coverImageUrl: '/uploads/wood.jpg',
+          coverImageAlt: 'Wood',
+          galleryImageUrls: ['/uploads/wood.jpg'],
+          body: 'Body copy',
+        },
+      ],
+    }),
+  })) as typeof JournalPostRecordModel.find;
 
   try {
     const content = await getJournalContent();
-    assert.deepEqual(content, defaultJournalContent);
+    assert.equal(content.previewHeading, 'Edited Journal');
+    assert.equal(content.posts.length, 1);
+    assert.equal(content.posts[0].slug, 'wood-selection');
+    assert.equal(content.posts[0].rank, 0);
   } finally {
     (JournalContentModel as unknown as { findOne: typeof JournalContentModel.findOne }).findOne = originalFindOne;
+    (JournalPostRecordModel as unknown as { find: typeof JournalPostRecordModel.find }).find = originalFindPosts;
   }
 });
 
-test('upsertJournalContent persists with fixed key and returns normalized input', async () => {
+test('upsertJournalContent persists settings and syncs post records', async () => {
   const originalFindOneAndUpdate = JournalContentModel.findOneAndUpdate;
+  const originalPostFindOneAndUpdate = JournalPostRecordModel.findOneAndUpdate;
+  const originalPostDeleteMany = JournalPostRecordModel.deleteMany;
+  const originalFindOne = JournalContentModel.findOne;
+  const originalFindPosts = JournalPostRecordModel.find;
+  const input = {
+    ...defaultJournalContent,
+    previewHeading: 'Edited Journal Heading',
+    posts: defaultJournalContent.posts.slice(0, 2),
+  };
 
   (JournalContentModel as unknown as { findOneAndUpdate: (...args: unknown[]) => Promise<unknown> }).findOneAndUpdate = (
     filter: unknown,
@@ -234,11 +425,30 @@ test('upsertJournalContent persists with fixed key and returns normalized input'
     return Promise.resolve(null);
   };
 
-  const input = {
-    ...defaultJournalContent,
-    previewHeading: 'Edited Journal Heading',
-    posts: defaultJournalContent.posts.slice(0, 2),
-  };
+  (JournalPostRecordModel as unknown as { findOneAndUpdate: typeof JournalPostRecordModel.findOneAndUpdate }).findOneAndUpdate =
+    (() => Promise.resolve(null)) as typeof JournalPostRecordModel.findOneAndUpdate;
+  (JournalPostRecordModel as unknown as { deleteMany: typeof JournalPostRecordModel.deleteMany }).deleteMany =
+    (() => Promise.resolve(null)) as typeof JournalPostRecordModel.deleteMany;
+  (JournalContentModel as unknown as { findOne: typeof JournalContentModel.findOne }).findOne = () => ({
+    lean: async () => ({
+      key: 'primary-journal',
+      previewEyebrow: 'Insights',
+      previewHeading: 'Edited Journal Heading',
+      previewDescription: 'Preview',
+      pageEyebrow: 'Journal',
+      pageHeading: 'Page heading',
+      pageDescription: 'Page description',
+    }),
+  }) as ReturnType<typeof JournalContentModel.findOne>;
+  (JournalPostRecordModel as unknown as { find: typeof JournalPostRecordModel.find }).find = (() => ({
+    sort: () => ({
+      lean: async () => input.posts.map((post, rank) => ({
+        key: post.id,
+        ...post,
+        rank,
+      })),
+    }),
+  })) as typeof JournalPostRecordModel.find;
 
   try {
     const saved = await upsertJournalContent(input);
@@ -247,6 +457,10 @@ test('upsertJournalContent persists with fixed key and returns normalized input'
   } finally {
     (JournalContentModel as unknown as { findOneAndUpdate: typeof JournalContentModel.findOneAndUpdate }).findOneAndUpdate =
       originalFindOneAndUpdate;
+    (JournalPostRecordModel as unknown as { findOneAndUpdate: typeof JournalPostRecordModel.findOneAndUpdate }).findOneAndUpdate = originalPostFindOneAndUpdate;
+    (JournalPostRecordModel as unknown as { deleteMany: typeof JournalPostRecordModel.deleteMany }).deleteMany = originalPostDeleteMany;
+    (JournalContentModel as unknown as { findOne: typeof JournalContentModel.findOne }).findOne = originalFindOne;
+    (JournalPostRecordModel as unknown as { find: typeof JournalPostRecordModel.find }).find = originalFindPosts;
   }
 });
 
