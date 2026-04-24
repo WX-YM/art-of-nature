@@ -91,7 +91,7 @@ export function Navigation({ currentPath = '/', onNavigate }: NavigationProps) {
             .nav-title { font-family: 'Banana Bee', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
           `}</style>
 
-          <div className="mr-4 h-14 w-14 sm:h-16 sm:w-16 rounded-full overflow-hidden flex items-center justify-center border border-border p-1">
+          <div className="mr-4 h-14 w-14 sm:h-16 sm:w-16 rounded-full overflow-hidden flex items-center justify-center">
             <picture>
               <source
                 type="image/webp"
@@ -111,7 +111,7 @@ export function Navigation({ currentPath = '/', onNavigate }: NavigationProps) {
                   '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/AON-high-resolution-logo-transparent-192.png 192w'
                 }
                 alt="Art of Nature logo"
-                className="h-full w-full object-cover"
+                className="h-full w-full object-cover border-0 shadow-none bg-transparent"
               />
             </picture>
           </div>
