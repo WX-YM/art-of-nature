@@ -2,6 +2,17 @@ import nodemailer from 'nodemailer';
 import type { ContactMessageInput } from '../src/app/lib/contactMessage';
 import { ForwardingSettingsModel } from './models/ForwardingSettings';
 
+const transportFactoryDefault = nodemailer.createTransport;
+let transportFactory: typeof nodemailer.createTransport = transportFactoryDefault;
+
+export function __test_setTransportFactory(fn: typeof nodemailer.createTransport) {
+  transportFactory = fn;
+}
+
+export function __test_resetTransportFactory() {
+  transportFactory = transportFactoryDefault;
+}
+
 type SmtpTransportConfig = {
   host: string;
   port: number;
@@ -13,7 +24,7 @@ type SmtpTransportConfig = {
 };
 
 function createSmtpTransporter(config: SmtpTransportConfig) {
-  return nodemailer.createTransport({
+  return transportFactory({
     host: config.host,
     port: config.port,
     secure: config.secure,
@@ -66,7 +77,7 @@ async function sendWithGmailOAuth(message: ContactMessageInput) {
     return false;
   }
 
-  const transporter = nodemailer.createTransport({
+  const transporter = transportFactory({
     service: 'gmail',
     auth: {
       type: 'OAuth2',
