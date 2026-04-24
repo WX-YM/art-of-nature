@@ -1,4 +1,3 @@
-import { ArrowUpRight } from 'lucide-react';
 import { useState } from 'react';
 import {
   buildGalleryCategories,
@@ -80,7 +79,6 @@ function PieceCard({
       style={{ animationDelay: `${0.07 * (index + 1)}s` }}
     >
       <div className="space-y-3 border-b border-border/70 p-5 sm:p-6">
-        <p className="text-[0.78rem] uppercase tracking-[0.28em] text-foreground/50">{piece.subcategory}</p>
         <button
           type="button"
           onClick={() => onOpen(piece, 0)}
@@ -88,24 +86,6 @@ function PieceCard({
         >
           {piece.title}
         </button>
-        <p className="text-sm leading-7 text-foreground/68 sm:text-base">{piece.material}</p>
-        <p className="text-sm leading-7 text-foreground/62">{piece.note}</p>
-        <p className="text-xs uppercase tracking-[0.22em] text-foreground/42">
-          Archive set · {piece.archiveCount} image{piece.archiveCount === 1 ? '' : 's'}
-        </p>
-        <div className="flex flex-wrap items-center gap-4 pt-2">
-          <button
-            type="button"
-            onClick={() => onOpen(piece, 0)}
-            className="inline-flex items-center gap-2 text-sm font-medium text-foreground/80 transition-colors hover:text-accent"
-          >
-            Open archive
-            <ArrowUpRight size={15} />
-          </button>
-          <a href="/#contact" className="text-sm font-medium text-foreground/72 transition-colors hover:text-accent">
-            Inquire for Details
-          </a>
-        </div>
       </div>
       <div className="grid gap-3 p-5 sm:grid-cols-2 sm:p-6">
         {previewImages.map((asset, assetIndex) => {
@@ -119,10 +99,10 @@ function PieceCard({
               onClick={() => onOpen(piece, assetIndex)}
               className={
                 imageCount === 1
-                  ? 'h-[20rem] overflow-hidden text-left sm:h-[24rem]'
+                  ? 'h-[20rem] w-full overflow-hidden text-left sm:col-span-2 sm:h-[24rem]'
                   : assetIndex === 0
-                    ? 'h-[20rem] overflow-hidden text-left sm:col-span-2 sm:h-[28rem]'
-                    : 'h-[13rem] overflow-hidden text-left sm:h-[15rem]'
+                    ? 'h-[20rem] w-full overflow-hidden text-left sm:col-span-2 sm:h-[28rem]'
+                    : 'h-[13rem] w-full overflow-hidden text-left sm:h-[15rem]'
               }
             >
               <div className="relative h-full w-full">
@@ -135,7 +115,7 @@ function PieceCard({
                       : '(min-width: 1024px) 12rem, (min-width: 640px) 24rem, 50vw'
                   }
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/38 via-transparent to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/38 via-transparent to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100" />
                 {showMoreOverlay ? (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/26 text-center text-lg font-medium text-white backdrop-blur-[1px]">
                     +{hiddenImageCount} more
@@ -160,17 +140,12 @@ export function GalleryPage({ content }: GalleryPageProps) {
   return (
     <main className="pb-20 pt-28 sm:pt-32 lg:pb-32">
       <section className="gallery-shell">
-        <div className="reveal-up grid gap-10 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
+        <div className="reveal-up">
           <div>
             <p className="section-kicker">{content.pageEyebrow}</p>
             <h1 style={{ fontSize: 'clamp(3rem, 7vw, 6rem)', lineHeight: '0.95' }}>
               {content.pageHeading}
             </h1>
-          </div>
-          <div className="max-w-xl lg:justify-self-end">
-            <p className="text-[1.02rem] leading-8 text-foreground/72 sm:text-[1.08rem]">
-              {content.pageDescription}
-            </p>
           </div>
         </div>
       </section>
@@ -202,7 +177,6 @@ export function GalleryPage({ content }: GalleryPageProps) {
               const pieceCount = getPieceCount(category);
               const imageCount = getImageCount(category);
               const leadPiece = getLeadPiece(category);
-              const roomNumber = String(categoryIndex + 1).padStart(2, '0');
 
               return (
                 <>
@@ -211,12 +185,6 @@ export function GalleryPage({ content }: GalleryPageProps) {
                       className="reveal-up border-t border-border/80 pt-5"
                       style={{ animationDelay: `${0.05 * (categoryIndex + 1)}s` }}
                     >
-                      <div className="mb-5 flex items-center gap-4">
-                        <span className="text-[0.72rem] uppercase tracking-[0.28em] text-foreground/42">
-                          Room {roomNumber}
-                        </span>
-                        <span className="h-px flex-1 bg-border/80" />
-                      </div>
                       <p className="section-kicker">{category.eyebrow}</p>
                       <h2 style={{ fontSize: 'clamp(2.2rem, 4vw, 4rem)', lineHeight: '1.02' }}>
                         {category.name}
@@ -281,85 +249,36 @@ export function GalleryPage({ content }: GalleryPageProps) {
                     </div>
                   </div>
 
-                  <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)] 2xl:grid-cols-[19.5rem_minmax(0,1fr)] 2xl:gap-8">
-                    <div
-                      className="reveal-up panel-surface h-fit p-6 xl:sticky xl:top-28"
-                      style={{ animationDelay: `${0.1 * (categoryIndex + 1)}s` }}
-                    >
-                      <p className="text-[0.78rem] uppercase tracking-[0.28em] text-foreground/46">Room index</p>
-                      <div className="mt-5 space-y-3 text-sm text-foreground/68">
-                        <div className="flex items-center justify-between gap-4 border-b border-border/60 pb-3">
-                          <span>Sections</span>
-                          <span className="text-[0.74rem] uppercase tracking-[0.22em] text-foreground/42">
-                            {category.subcategories.length}
+                  <div className="space-y-8">
+                    {category.subcategories.map((subcategory) => (
+                      <section key={`${category.name}-${subcategory.name}`} className="space-y-4">
+                        <div className="flex items-center justify-between gap-4 border-b border-border/80 pb-3">
+                          <h3 className="text-[1.45rem] leading-tight">{subcategory.name}</h3>
+                          <span className="text-xs uppercase tracking-[0.22em] text-foreground/42">
+                            {subcategory.pieces.length > 0
+                              ? `${subcategory.pieces.length} piece${subcategory.pieces.length > 1 ? 's' : ''}`
+                              : 'Archive pending'}
                           </span>
                         </div>
-                        <div className="flex items-center justify-between gap-4 border-b border-border/60 pb-3">
-                          <span>Pieces</span>
-                          <span className="text-[0.74rem] uppercase tracking-[0.22em] text-foreground/42">
-                            {pieceCount}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4 pb-1">
-                          <span>Images</span>
-                          <span className="text-[0.74rem] uppercase tracking-[0.22em] text-foreground/42">
-                            {imageCount}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="mt-6 border-t border-border/70 pt-5">
-                        <p className="text-[0.72rem] uppercase tracking-[0.24em] text-foreground/42">Sections</p>
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {category.subcategories.map((subcategory) => (
-                            <span
-                              key={subcategory.name}
-                              className="border border-border bg-white px-3 py-2 text-xs uppercase tracking-[0.18em] text-foreground/62"
-                            >
-                              {subcategory.name}
-                            </span>
-                          ))}
-                        </div>
-                        <a
-                          href="/#contact"
-                          className="mt-6 inline-flex items-center gap-2 text-sm font-medium text-foreground transition-colors hover:text-accent"
-                        >
-                          Inquire for Details
-                          <ArrowUpRight size={16} />
-                        </a>
-                      </div>
-                    </div>
 
-                    <div className="space-y-8">
-                      {category.subcategories.map((subcategory) => (
-                        <section key={`${category.name}-${subcategory.name}`} className="space-y-4">
-                          <div className="flex items-center justify-between gap-4 border-b border-border/80 pb-3">
-                            <h3 className="text-[1.45rem] leading-tight">{subcategory.name}</h3>
-                            <span className="text-xs uppercase tracking-[0.22em] text-foreground/42">
-                              {subcategory.pieces.length > 0
-                                ? `${subcategory.pieces.length} piece${subcategory.pieces.length > 1 ? 's' : ''}`
-                                : 'Archive pending'}
-                            </span>
+                        {subcategory.pieces.length > 0 ? (
+                          <div className="gallery-masonry">
+                            {subcategory.pieces.map((piece, index) => (
+                              <PieceCard
+                                key={piece.id}
+                                piece={piece}
+                                index={index}
+                                onOpen={(selectedPiece, imageIndex = 0) => {
+                                  setViewerState({ piece: selectedPiece, imageIndex });
+                                }}
+                              />
+                            ))}
                           </div>
-
-                          {subcategory.pieces.length > 0 ? (
-                            <div className="gallery-masonry">
-                              {subcategory.pieces.map((piece, index) => (
-                                <PieceCard
-                                  key={piece.id}
-                                  piece={piece}
-                                  index={index}
-                                  onOpen={(selectedPiece, imageIndex = 0) => {
-                                    setViewerState({ piece: selectedPiece, imageIndex });
-                                  }}
-                                />
-                              ))}
-                            </div>
-                          ) : (
-                            <EmptyCollectionCard categoryName={category.name} subcategory={subcategory} />
-                          )}
-                        </section>
-                      ))}
-                    </div>
+                        ) : (
+                          <EmptyCollectionCard categoryName={category.name} subcategory={subcategory} />
+                        )}
+                      </section>
+                    ))}
                   </div>
                 </>
               );

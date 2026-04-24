@@ -1071,6 +1071,12 @@ app.get('/admin', async (req, res, next) => {
       .section-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .gallery-category-grid { display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
       .gallery-category-card { border: 1px solid var(--admin-border); border-radius: 18px; padding: 1rem; background: rgba(255,255,255,0.74); }
+      .gallery-category-card-header { display: flex; align-items: start; justify-content: space-between; gap: 0.8rem; }
+      .gallery-category-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.45rem; }
+      .gallery-management-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.8rem; margin-top: 1rem; }
+      .gallery-management-note { max-width: 40rem; margin: 0; color: var(--admin-muted); line-height: 1.7; }
+      .gallery-upload-builder { display: grid; gap: 0.9rem; margin: 1rem 0 0.9rem; padding: 1rem 1.1rem; border: 1px solid var(--admin-border); border-radius: 18px; background: rgba(255,255,255,0.74); }
+      .gallery-upload-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); align-items: end; }
       .gallery-editor-toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between; margin: 1rem 0; }
       .gallery-toolbar-main { display: grid; gap: 0.8rem; flex: 1 1 34rem; }
       .gallery-toolbar-filters { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
@@ -1446,14 +1452,34 @@ app.get('/admin', async (req, res, next) => {
           <div class="gallery-category-grid" style="margin-top:1rem;">
             ${gallery.categories
               .map(
-                (category) => `<div class="gallery-category-card">
-                  <p class="admin-eyebrow" style="margin-top:0;">${escapeHtml(category.name)}</p>
+                (category) => {
+                  const categoryPieceCount = gallery.pieces.filter((piece) => piece.category === category.name).length;
+                  return `<div class="gallery-category-card">
+                  <div class="gallery-category-card-header">
+                    <div>
+                      <p class="admin-eyebrow" style="margin-top:0;">${escapeHtml(category.name)}</p>
+                      <p class="upload-help" style="margin:0.2rem 0 0;">${escapeHtml(String(categoryPieceCount))} piece${categoryPieceCount === 1 ? '' : 's'} / ${escapeHtml(String(category.subcategories.length))} section${category.subcategories.length === 1 ? '' : 's'}</p>
+                    </div>
+                    <div class="gallery-category-card-actions">
+                      <button type="button" class="ghost-button" data-set-gallery-folder="${escapeHtml(category.name)}">Use Folder</button>
+                      <button type="button" class="button-danger" data-delete-gallery-category="${escapeHtml(category.name)}">Delete</button>
+                    </div>
+                  </div>
                   <p><label>Rank<br /><input type="number" name="galleryRank:${escapeHtml(category.name)}" value="${escapeHtml(String(category.rank ?? 0))}" /></label></p>
-                  <p><label>Eyebrow<br /><input name="galleryEyebrow:${escapeHtml(category.name)}" required value="${escapeHtml(category.eyebrow)}" /></label></p>
+                  <p><label>Eyebrow (for room header / future use)<br /><input name="galleryEyebrow:${escapeHtml(category.name)}" required value="${escapeHtml(category.eyebrow)}" /></label></p>
                   <p><label>Description<br /><textarea name="galleryDescription:${escapeHtml(category.name)}" required style="min-height:110px;">${escapeHtml(category.description)}</textarea></label></p>
-                </div>`
+                </div>`;
+                }
               )
               .join('')}
+          </div>
+
+          <div class="gallery-management-bar">
+            <p class="gallery-management-note">Use this section to reorder, edit, add, or remove categories. Category changes are saved with the same Gallery save action, and deleting a category also removes its subcategories and pieces.</p>
+            <div class="toolbar-actions">
+              <span class="count-chip">${gallery.categories.length} categories</span>
+              <button type="submit">Save Category Changes</button>
+            </div>
           </div>
 
           <div class="panel-surface" style="margin-top:1.2rem; padding:1rem 1.1rem;">
@@ -1462,7 +1488,7 @@ app.get('/admin', async (req, res, next) => {
             <div class="section-grid two">
               <p><label>Name<br /><input name="newGalleryCategoryName" placeholder="e.g. Studio Pieces" /></label></p>
               <p><label>Rank<br /><input type="number" name="newGalleryCategoryRank" value="${escapeHtml(String(gallery.categories.length))}" /></label></p>
-              <p><label>Eyebrow<br /><input name="newGalleryCategoryEyebrow" placeholder="e.g. Gallery VII" /></label></p>
+              <p><label>Eyebrow (for room header / future use)<br /><input name="newGalleryCategoryEyebrow" placeholder="e.g. Gallery VII" /></label></p>
               <p><label>Subcategories<br /><textarea name="newGalleryCategorySubcategories" placeholder="One subcategory per line" style="min-height:110px;"></textarea></label></p>
               <p class="full" style="grid-column:1 / -1;"><label>Description<br /><textarea name="newGalleryCategoryDescription" placeholder="Describe the mood and purpose of this category." style="min-height:110px;"></textarea></label></p>
             </div>
@@ -1504,6 +1530,30 @@ app.get('/admin', async (req, res, next) => {
       <section>
         <h2>Image Library</h2>
         <p class="section-intro">Select an Image URLs field in a piece, then copy or insert assets from the archive directly into that item.</p>
+        <div class="gallery-upload-builder">
+          <div>
+            <strong style="display:block; margin-bottom:0.25rem;">Upload Into A Category Folder</strong>
+            <p class="upload-help" style="margin:0;">Choose a category and subcategory, then upload images straight into that archive path. If a gallery image field is selected, uploaded URLs can be inserted automatically there too.</p>
+          </div>
+          <div class="gallery-upload-grid">
+            <p style="margin:0;"><label>Category<br />
+              <select id="gallery-upload-category">
+                ${gallery.categories
+                  .map((category) => `<option value="${escapeHtml(category.name)}">${escapeHtml(category.name)}</option>`)
+                  .join('')}
+              </select>
+            </label></p>
+            <p style="margin:0;"><label>Subcategory<br />
+              <select id="gallery-upload-subcategory"></select>
+            </label></p>
+            <p style="margin:0;"><label>Image Files<br /><input type="file" id="gallery-device-upload" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" multiple /></label></p>
+            <div class="toolbar-actions" style="align-self:end;">
+              <button type="button" id="gallery-sync-folder" class="ghost-button">Set Target Folder</button>
+              <button type="button" id="gallery-open-folder" class="ghost-button">Open Folder</button>
+              <button type="button" id="gallery-upload-files" class="ghost-button">Upload Files</button>
+            </div>
+          </div>
+        </div>
         <div class="upload-library-toolbar">
           <p style="margin:0;"><label>Search Archive<br /><input type="search" id="uploads-search" placeholder="Filename, folder, or URL" /></label></p>
           <p style="margin:0;"><label>Target Folder<br /><input type="text" id="uploads-folder" placeholder="e.g. gallery/living-room" /></label></p>
@@ -1667,6 +1717,12 @@ app.get('/admin', async (req, res, next) => {
         const createUploadFolderButton = document.getElementById('create-upload-folder');
         const uploadsGoRootButton = document.getElementById('uploads-go-root');
         const uploadsGoParentButton = document.getElementById('uploads-go-parent');
+        const galleryUploadCategorySelect = document.getElementById('gallery-upload-category');
+        const galleryUploadSubcategorySelect = document.getElementById('gallery-upload-subcategory');
+        const galleryDeviceUploadInput = document.getElementById('gallery-device-upload');
+        const gallerySyncFolderButton = document.getElementById('gallery-sync-folder');
+        const galleryOpenFolderButton = document.getElementById('gallery-open-folder');
+        const galleryUploadFilesButton = document.getElementById('gallery-upload-files');
         const galleryEditorData = ${serializeForScript(galleryEditorState)};
         const galleryEditorEl = document.getElementById('gallery-piece-editor');
         const galleryAddPieceButton = document.getElementById('gallery-add-piece');
@@ -1720,10 +1776,85 @@ app.get('/admin', async (req, res, next) => {
             .replace(/^-|-$/g, '');
         }
 
+        function slugifyUploadsSegment(value) {
+          return String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-|-$/g, '');
+        }
+
         function getCategoryConfig(categoryName) {
           return galleryCategories.find(function (category) {
             return category && category.name === categoryName;
           }) || galleryCategories[0] || null;
+        }
+
+        function updateGalleryUploadSubcategoryOptions(selectedValue) {
+          if (!(galleryUploadCategorySelect instanceof HTMLSelectElement) || !(galleryUploadSubcategorySelect instanceof HTMLSelectElement)) {
+            return;
+          }
+
+          const category = getCategoryConfig(galleryUploadCategorySelect.value);
+          const subcategories = category && Array.isArray(category.subcategories) ? category.subcategories : [];
+          const nextValue = typeof selectedValue === 'string' && subcategories.includes(selectedValue)
+            ? selectedValue
+            : (subcategories[0] || '');
+
+          galleryUploadSubcategorySelect.innerHTML = subcategories
+            .map(function (subcategory) {
+              const selected = subcategory === nextValue ? 'selected' : '';
+              return '<option value="' + escapeHtmlValue(subcategory) + '" ' + selected + '>' + escapeHtmlValue(subcategory) + '</option>';
+            })
+            .join('');
+        }
+
+        function getSelectedGalleryUploadFolder() {
+          if (!(galleryUploadCategorySelect instanceof HTMLSelectElement)) {
+            return normalizeUploadsPath(currentUploadsPath);
+          }
+
+          const categorySegment = slugifyUploadsSegment(galleryUploadCategorySelect.value);
+          const subcategoryValue =
+            galleryUploadSubcategorySelect instanceof HTMLSelectElement
+              ? galleryUploadSubcategorySelect.value
+              : '';
+          const subcategorySegment = slugifyUploadsSegment(subcategoryValue);
+
+          return normalizeUploadsPath(['gallery', categorySegment, subcategorySegment].filter(Boolean).join('/'));
+        }
+
+        function applyGalleryUploadFolder(options) {
+          const opts = options || {};
+          const nextFolder = getSelectedGalleryUploadFolder();
+          currentUploadsPath = nextFolder;
+          syncUploadsFolderInput();
+          renderUploadsPathbar();
+
+          if (opts.openFolder === true) {
+            refreshUploads(nextFolder);
+          }
+
+          return nextFolder;
+        }
+
+        function syncGalleryFolderFromFocusedPiece() {
+          if (!(lastFocusedUploadField instanceof HTMLTextAreaElement) || !galleryEditorEl || !galleryEditorEl.contains(lastFocusedUploadField)) {
+            return false;
+          }
+
+          const card = lastFocusedUploadField.closest('[data-piece-card]');
+          const categoryField = card && card.querySelector('[data-field="category"]');
+          const subcategoryField = card && card.querySelector('[data-field="subcategory"]');
+
+          if (!(galleryUploadCategorySelect instanceof HTMLSelectElement) || !(categoryField instanceof HTMLSelectElement)) {
+            return false;
+          }
+
+          galleryUploadCategorySelect.value = categoryField.value;
+          updateGalleryUploadSubcategoryOptions(subcategoryField instanceof HTMLSelectElement ? subcategoryField.value : '');
+          applyGalleryUploadFolder({ openFolder: false });
+          return true;
         }
 
         function getSubcategoryOptions(categoryName, selectedValue) {
@@ -2469,6 +2600,59 @@ app.get('/admin', async (req, res, next) => {
           return uploadedUrls;
         }
 
+        async function uploadGalleryDeviceFiles() {
+          if (!(galleryDeviceUploadInput instanceof HTMLInputElement)) {
+            return;
+          }
+
+          const files = galleryDeviceUploadInput.files ? Array.from(galleryDeviceUploadInput.files) : [];
+          if (files.length === 0) {
+            setStatus('Select one or more gallery images first.', true);
+            return;
+          }
+
+          const folderPath = applyGalleryUploadFolder({ openFolder: false });
+          const shouldInsertIntoFocusedField =
+            lastFocusedUploadField instanceof HTMLTextAreaElement &&
+            document.contains(lastFocusedUploadField) &&
+            galleryEditorEl &&
+            galleryEditorEl.contains(lastFocusedUploadField);
+
+          try {
+            if (galleryUploadFilesButton instanceof HTMLButtonElement) {
+              galleryUploadFilesButton.disabled = true;
+              galleryUploadFilesButton.textContent = 'Uploading...';
+            }
+
+            setStatus('Uploading gallery image' + (files.length === 1 ? '' : 's') + ' to ' + folderPath + '...', false);
+            const uploadedUrls = await uploadMultipleImages(files);
+            if (shouldInsertIntoFocusedField) {
+              uploadedUrls.forEach(function (url) {
+                insertUploadUrlIntoField(lastFocusedUploadField, url, 'append');
+              });
+              syncVisiblePiecesIntoState();
+              renderGalleryEditor();
+            }
+
+            galleryDeviceUploadInput.value = '';
+            await refreshUploads(folderPath);
+            setStatus(
+              shouldInsertIntoFocusedField
+                ? 'Uploaded ' + uploadedUrls.length + ' image' + (uploadedUrls.length === 1 ? '' : 's') + ' and inserted the URLs into the selected gallery field.'
+                : 'Uploaded ' + uploadedUrls.length + ' image' + (uploadedUrls.length === 1 ? '' : 's') + ' to ' + folderPath + '.',
+              false
+            );
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Upload failed.';
+            setStatus(message, true);
+          } finally {
+            if (galleryUploadFilesButton instanceof HTMLButtonElement) {
+              galleryUploadFilesButton.disabled = false;
+              galleryUploadFilesButton.textContent = 'Upload Files';
+            }
+          }
+        }
+
         function getContentImageUploadElements(form, targetField) {
           if (!(form instanceof HTMLFormElement) || !targetField) {
             return null;
@@ -2712,6 +2896,58 @@ app.get('/admin', async (req, res, next) => {
               const message = error instanceof Error ? error.message : 'Delete failed.';
               setStatus(message, true);
             }
+            return;
+          }
+
+          const setGalleryFolderButton = event.target.closest('[data-set-gallery-folder]');
+          if (setGalleryFolderButton) {
+            event.preventDefault();
+            const categoryName = setGalleryFolderButton.getAttribute('data-set-gallery-folder') || '';
+            if (!(galleryUploadCategorySelect instanceof HTMLSelectElement)) {
+              return;
+            }
+
+            galleryUploadCategorySelect.value = categoryName;
+            updateGalleryUploadSubcategoryOptions();
+            const folderPath = applyGalleryUploadFolder({ openFolder: true });
+            setStatus('Target folder set to ' + folderPath + '.', false);
+            return;
+          }
+
+          const deleteCategoryButton = event.target.closest('[data-delete-gallery-category]');
+          if (deleteCategoryButton) {
+            event.preventDefault();
+            const categoryName = deleteCategoryButton.getAttribute('data-delete-gallery-category') || '';
+            if (!categoryName) {
+              setStatus('Could not identify category to delete.', true);
+              return;
+            }
+
+            const confirmed = window.confirm('Delete "' + categoryName + '" and all of its subcategories and pieces? This cannot be undone.');
+            if (!confirmed) {
+              return;
+            }
+
+            try {
+              setStatus('Deleting category...', false);
+              const response = await fetch('/api/gallery/categories/' + encodeURIComponent(categoryName), {
+                method: 'DELETE',
+                cache: 'no-store',
+                credentials: 'same-origin',
+              });
+
+              if (!response.ok) {
+                const payload = await response.json().catch(function () { return {}; });
+                throw new Error(payload && payload.message ? payload.message : 'Delete failed.');
+              }
+
+              setStatus('Category deleted. Refreshing gallery editor...', false);
+              window.location.href = '/admin?tab=gallery&status=saved';
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Delete failed.';
+              setStatus(message, true);
+            }
+            return;
           }
         });
 
@@ -2811,6 +3047,7 @@ app.get('/admin', async (req, res, next) => {
               target.getAttribute('data-field') === 'imageUrls'
             ) {
               lastFocusedUploadField = target;
+              syncGalleryFolderFromFocusedPiece();
             }
           });
 
@@ -2898,6 +3135,64 @@ app.get('/admin', async (req, res, next) => {
           galleryForm.addEventListener('submit', function () {
             syncVisiblePiecesIntoState();
             galleryPiecesJsonField.value = JSON.stringify(galleryPiecesState.filter(isMeaningfulPiece));
+          });
+        }
+
+        if (galleryUploadCategorySelect instanceof HTMLSelectElement) {
+          updateGalleryUploadSubcategoryOptions();
+          galleryUploadCategorySelect.addEventListener('change', function () {
+            updateGalleryUploadSubcategoryOptions();
+            const folderPath = applyGalleryUploadFolder({ openFolder: false });
+            setStatus('Target folder set to ' + folderPath + '.', false);
+          });
+        }
+
+        if (galleryUploadSubcategorySelect instanceof HTMLSelectElement) {
+          galleryUploadSubcategorySelect.addEventListener('change', function () {
+            const folderPath = applyGalleryUploadFolder({ openFolder: false });
+            setStatus('Target folder set to ' + folderPath + '.', false);
+          });
+        }
+
+        if (galleryDeviceUploadInput instanceof HTMLInputElement) {
+          galleryDeviceUploadInput.addEventListener('change', function () {
+            const selectedCount = galleryDeviceUploadInput.files ? galleryDeviceUploadInput.files.length : 0;
+            if (selectedCount === 0) {
+              return;
+            }
+
+            const folderPath = applyGalleryUploadFolder({ openFolder: false });
+            setStatus(
+              'Selected ' + selectedCount + ' gallery image' + (selectedCount === 1 ? '' : 's') + ' for ' + folderPath + '.',
+              false
+            );
+          });
+        }
+
+        if (gallerySyncFolderButton) {
+          gallerySyncFolderButton.addEventListener('click', function () {
+            const folderPath = syncGalleryFolderFromFocusedPiece()
+              ? getSelectedGalleryUploadFolder()
+              : applyGalleryUploadFolder({ openFolder: false });
+            setStatus('Target folder set to ' + folderPath + '.', false);
+          });
+        }
+
+        if (galleryOpenFolderButton) {
+          galleryOpenFolderButton.addEventListener('click', function () {
+            if (!syncGalleryFolderFromFocusedPiece()) {
+              applyGalleryUploadFolder({ openFolder: true });
+              return;
+            }
+
+            refreshUploads(getSelectedGalleryUploadFolder());
+          });
+        }
+
+        if (galleryUploadFilesButton) {
+          galleryUploadFilesButton.addEventListener('click', function () {
+            syncGalleryFolderFromFocusedPiece();
+            uploadGalleryDeviceFiles();
           });
         }
 
