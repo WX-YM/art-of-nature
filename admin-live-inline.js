@@ -1686,5 +1686,67 @@
           });
         }
 
+        // Enhance: submit admin content forms via fetch to provide async saves and better UX
+        document.querySelectorAll('form[action^="/admin/content/"]').forEach(function (formNode) {
+          formNode.addEventListener('submit', async function (event) {
+            // Allow earlier submit handlers to prepare form fields (they run first)
+            if (formNode.dataset.submitHandled === 'true') {
+              return;
+            }
+
+            event.preventDefault();
+
+            if (formNode.dataset.submitting === 'true') {
+              setStatus('Already saving...', false);
+              return;
+            }
+
+            formNode.dataset.submitting = 'true';
+            const submitButton = formNode.querySelector('[type="submit"]');
+            const originalLabel = submitButton instanceof HTMLButtonElement ? submitButton.textContent : null;
+            try {
+              if (submitButton instanceof HTMLButtonElement) {
+                submitButton.disabled = true;
+                submitButton.textContent = 'Saving...';
+              }
+
+              setStatus('Saving content…', false);
+
+              // Ensure any synchronous submit handlers run first (populate hidden JSON fields)
+              formNode.dispatchEvent(new Event('submit', { bubbles: true, cancelable: false }));
+
+              const formData = new FormData(formNode);
+              const response = await fetch(formNode.action, {
+                method: 'POST',
+                credentials: 'same-origin',
+                body: formData,
+              });
+
+              if (!response.ok) {
+                let msg = 'Save failed.';
+                try {
+                  const payload = await response.json();
+                  if (payload && payload.message) msg = payload.message;
+                } catch (_) {}
+                throw new Error(msg);
+              }
+
+              setStatus('Saved successfully.', false);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Save failed.';
+              setStatus(message, true);
+            } finally {
+              if (submitButton instanceof HTMLButtonElement) {
+                submitButton.disabled = false;
+                submitButton.textContent = originalLabel || 'Save';
+              }
+              delete formNode.dataset.submitting;
+              // mark that we've handled async submission to avoid recursion
+              formNode.dataset.submitHandled = 'true';
+              setTimeout(function () { delete formNode.dataset.submitHandled; }, 1200);
+            }
+          });
+        });
+
         refreshUploads();
       })();

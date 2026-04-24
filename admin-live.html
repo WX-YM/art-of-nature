@@ -518,6 +518,7 @@
         <a class="tab-link " href="/admin?tab=gallery">Gallery</a>
         <a class="tab-link " href="/admin?tab=journal">Journal</a>
         <a class="tab-link " href="/admin?tab=messages">Contact Messages</a>
+        <a class="tab-link " href="/admin?tab=downloads">Downloads</a>
       </nav>
       
       
@@ -619,6 +620,19 @@ Built to Last | Our commitment to quality means furniture that becomes part of y
         <p class="upload-help" id="upload-status">Upload images from Hero/About forms above. Reuse URLs here later across the homepage and gallery.</p>
         <div id="uploads-pathbar" class="uploads-pathbar"></div>
         <div id="uploads-list" class="uploads-list"></div>
+      </section>
+      <section>
+        <h2>Downloads</h2>
+        <p class="section-intro">Manage downloadable files (PDFs, zips, documents). Files uploaded here are publicly available under <strong>/downloads/</strong>.</p>
+        <div class="upload-library-toolbar">
+          <p style="margin:0;"><label>Target Folder<br /><input type="text" id="downloads-folder" placeholder="e.g. brochures/" /></label></p>
+          <p style="margin:0;"><input type="file" id="downloads-file-input" /></p>
+          <p style="margin:0;"><button type="button" id="downloads-upload-button" class="ghost-button">Upload File</button></p>
+          <p style="margin:0;"><button type="button" id="create-downloads-folder" class="ghost-button">Create Folder</button></p>
+        </div>
+        <p class="upload-help" id="downloads-status">Upload or delete downloadable items here.</p>
+        <div id="downloads-pathbar" class="uploads-pathbar"></div>
+        <div id="downloads-list" class="uploads-list"></div>
       </section>
       <section>
         <h2>Reset</h2>
@@ -2321,6 +2335,166 @@ Built to Last | Our commitment to quality means furniture that becomes part of y
         }
 
         refreshUploads();
+      })();
+    </script>
+    <script>
+      (function () {
+        const downloadsStatus = document.getElementById('downloads-status');
+        const downloadsListEl = document.getElementById('downloads-list');
+        const downloadsPathbarEl = document.getElementById('downloads-pathbar');
+        const downloadsFolderInput = document.getElementById('downloads-folder');
+        const downloadsFileInput = document.getElementById('downloads-file-input');
+        const downloadsUploadButton = document.getElementById('downloads-upload-button');
+        const createDownloadsFolderButton = document.getElementById('create-downloads-folder');
+
+        function setDownloadsStatus(message, isError) {
+          if (!downloadsStatus) return;
+          downloadsStatus.textContent = message;
+          downloadsStatus.style.color = isError ? '#b91c1c' : '';
+        }
+
+        async function refreshDownloads(path) {
+          try {
+            setDownloadsStatus('Loading...', false);
+            const query = path ? '?path=' + encodeURIComponent(path) : '';
+            const res = await fetch('/api/downloads/tree' + query, { credentials: 'same-origin' });
+            if (!res.ok) throw new Error('Could not load downloads.');
+            const entries = await res.json();
+            renderDownloads(entries, path || '');
+            setDownloadsStatus('Loaded.', false);
+          } catch (err) {
+            setDownloadsStatus(err instanceof Error ? err.message : 'Failed to load downloads.', true);
+          }
+        }
+
+        function renderDownloads(entries, currentPath) {
+          if (!downloadsListEl || !downloadsPathbarEl) return;
+          downloadsPathbarEl.innerHTML = '';
+          const crumb = document.createElement('a');
+          crumb.href = '#';
+          crumb.setAttribute('data-open-folder', '');
+          crumb.textContent = '/';
+          downloadsPathbarEl.appendChild(crumb);
+
+          downloadsListEl.innerHTML = entries.map(function (entry) {
+            if (entry.type === 'directory') {
+              return (
+                '<div class="upload-card">' +
+                '<div style="display:flex;align-items:center;justify-content:space-between;gap:0.6rem;">' +
+                '<div><strong>📁 ' + escapeHtmlValue(entry.name) + '</strong><div style="font-size:0.85rem;color:var(--admin-muted);">' + (entry.itemCount || 0) + ' items</div></div>' +
+                '<div><button data-open-folder="' + escapeHtmlValue(entry.path) + '" class="ghost-button">Open</button></div>' +
+                '</div></div>'
+              );
+            }
+
+            return (
+              '<div class="upload-card">' +
+              '<div style="display:flex;align-items:center;justify-content:space-between;gap:0.6rem;">' +
+              '<div><strong>' + escapeHtmlValue(entry.name) + '</strong><div style="font-size:0.85rem;color:var(--admin-muted);">' + (entry.uploadedAt || '') + '</div></div>' +
+              '<div style="display:flex;gap:0.45rem;"><a class="ghost-button" href="' + (entry.url || '#') + '">Download</a><button data-delete-download="' + escapeHtmlValue(entry.path) + '" class="danger-button">Delete</button></div>' +
+              '</div></div>'
+            );
+          }).join('');
+        }
+
+        async function uploadDownloadFile() {
+          if (!downloadsFileInput || !downloadsFileInput.files || downloadsFileInput.files.length === 0) {
+            setDownloadsStatus('Select a file to upload.', true);
+            return;
+          }
+
+          const file = downloadsFileInput.files[0];
+          const folder = downloadsFolderInput && downloadsFolderInput.value ? downloadsFolderInput.value.trim() : '';
+
+          try {
+            setDownloadsStatus('Reading file...', false);
+            const buffer = await file.arrayBuffer();
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+
+            setDownloadsStatus('Uploading...', false);
+            const res = await fetch('/api/downloads/files', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fileName: file.name, base64Data: base64, folder }),
+            });
+
+            if (!res.ok) {
+              const json = await res.json().catch(() => null);
+              throw new Error((json && json.message) || 'Upload failed.');
+            }
+
+            setDownloadsStatus('Uploaded successfully.', false);
+            downloadsFileInput.value = '';
+            await refreshDownloads(folder || '');
+          } catch (err) {
+            setDownloadsStatus(err instanceof Error ? err.message : 'Upload failed.', true);
+          }
+        }
+
+        async function createDownloadsFolder() {
+          const folder = downloadsFolderInput && downloadsFolderInput.value ? downloadsFolderInput.value.trim() : '';
+          if (!folder) { setDownloadsStatus('Enter a folder name first.', true); return; }
+
+          try {
+            setDownloadsStatus('Creating folder...', false);
+            const res = await fetch('/api/downloads/folders', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ folder }),
+            });
+
+            if (!res.ok) throw new Error('Could not create folder.');
+            setDownloadsStatus('Folder created.', false);
+            await refreshDownloads(folder);
+          } catch (err) {
+            setDownloadsStatus(err instanceof Error ? err.message : 'Failed to create folder.', true);
+          }
+        }
+
+        if (downloadsPathbarEl) {
+          downloadsPathbarEl.addEventListener('click', function (ev) {
+            const btn = (ev.target instanceof Element) ? ev.target.closest('[data-open-folder]') : null;
+            if (btn) {
+              ev.preventDefault();
+              refreshDownloads(btn.getAttribute('data-open-folder') || '');
+            }
+          });
+        }
+
+        if (downloadsListEl) {
+          downloadsListEl.addEventListener('click', async function (ev) {
+            const del = (ev.target instanceof Element) ? ev.target.closest('[data-delete-download]') : null;
+            const open = (ev.target instanceof Element) ? ev.target.closest('[data-open-folder]') : null;
+
+            if (del) {
+              const path = del.getAttribute('data-delete-download') || '';
+              if (!confirm('Delete ' + path + '?')) return;
+
+              try {
+                setDownloadsStatus('Deleting...', false);
+                const res = await fetch('/api/downloads/files?path=' + encodeURIComponent(path), { method: 'DELETE', credentials: 'same-origin' });
+                if (!res.ok) throw new Error('Delete failed.');
+                setDownloadsStatus('Deleted.', false);
+                await refreshDownloads(downloadsFolderInput && downloadsFolderInput.value ? downloadsFolderInput.value.trim() : '');
+              } catch (err) {
+                setDownloadsStatus(err instanceof Error ? err.message : 'Delete failed.', true);
+              }
+            }
+
+            if (open) {
+              ev.preventDefault();
+              refreshDownloads(open.getAttribute('data-open-folder') || '');
+            }
+          });
+        }
+
+        if (downloadsUploadButton) downloadsUploadButton.addEventListener('click', uploadDownloadFile);
+        if (createDownloadsFolderButton) createDownloadsFolderButton.addEventListener('click', createDownloadsFolder);
+
+        // Initial load
+        refreshDownloads('');
       })();
     </script>
   </body>

@@ -47,6 +47,8 @@ import {
   deleteUpload,
   deleteUploadFolder,
 } from './upload-service';
+
+const downloadsDir = path.resolve(uploadsDir, 'downloads');
 import {
   deleteGalleryCategoryRecord,
   getRankedGalleryCategories,
@@ -64,6 +66,7 @@ app.set('trust proxy', true);
 app.use(express.json({ limit: '32mb' }));
 app.use(express.urlencoded({ extended: true, limit: '32mb' }));
 app.use('/uploads', express.static(uploadsDir));
+app.use('/downloads', express.static(downloadsDir));
 app.use('/api', (req, res, next) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   next();
@@ -4429,6 +4432,128 @@ app.delete('/api/uploads/folders', async (req, res, next) => {
       return;
     }
 
+    if (error instanceof Error && isUploadClientErrorMessage(error.message)) {
+      res.status(400).json({ message: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
+// Downloads management (separate folder under uploads)
+app.get('/api/downloads/tree', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const requestedPath = typeof req.query.path === 'string' ? req.query.path : undefined;
+    const entries = await listUploadEntries(downloadsDir, { path: requestedPath });
+    res.json(entries);
+  } catch (error) {
+    if (error instanceof Error && isUploadClientErrorMessage(error.message)) {
+      res.status(400).json({ message: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/downloads/files', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const payload = req.body as { fileName?: unknown; base64Data?: unknown; folder?: unknown };
+    const fileName = typeof payload.fileName === 'string' ? payload.fileName.trim() : '';
+    const base64Data = typeof payload.base64Data === 'string' ? payload.base64Data.trim() : '';
+    const folder = typeof payload.folder === 'string' ? payload.folder : undefined;
+
+    if (!fileName || !base64Data) {
+      res.status(400).json({ message: 'Missing fileName or data.' });
+      return;
+    }
+
+    const buffer = Buffer.from(base64Data, 'base64');
+    const maxBytes = 50 * 1024 * 1024;
+    if (!buffer.length || buffer.length > maxBytes) {
+      res.status(400).json({ message: 'Invalid file size.' });
+      return;
+    }
+
+    const targetFolderResolved = path.resolve(downloadsDir, folder || '.');
+    const relative = path.relative(downloadsDir, targetFolderResolved);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      res.status(400).json({ message: 'Invalid target folder.' });
+      return;
+    }
+
+    await mkdir(targetFolderResolved, { recursive: true });
+
+    const safeBase = path.basename(fileName).replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+    const uniqueName = `${Date.now()}-${randomBytes(6).toString('hex')}-${safeBase}`;
+    const fullPath = path.resolve(targetFolderResolved, uniqueName);
+    await writeFile(fullPath, buffer);
+
+    const relPath = path.relative(downloadsDir, fullPath).split(path.sep).join('/');
+    const url = `/downloads/${relPath.split('/').map(encodeURIComponent).join('/')}`;
+
+    res.status(201).json({ url, path: relPath, name: uniqueName });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/downloads/files', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const requestedPath = typeof req.query.path === 'string' ? req.query.path : undefined;
+    if (!requestedPath) {
+      res.status(400).json({ message: 'Missing path.' });
+      return;
+    }
+
+    await deleteUpload(requestedPath, downloadsDir);
+    res.status(204).end();
+  } catch (error) {
+    if (error instanceof Error && error.message === 'File not found.') {
+      res.status(404).json({ message: error.message });
+      return;
+    }
+
+    if (error instanceof Error && isUploadClientErrorMessage(error.message)) {
+      res.status(400).json({ message: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/downloads/folders', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const payload = req.body as { folder?: unknown };
+    const created = await createUploadFolder(payload.folder, downloadsDir);
+    res.status(201).json(created);
+  } catch (error) {
     if (error instanceof Error && isUploadClientErrorMessage(error.message)) {
       res.status(400).json({ message: error.message });
       return;

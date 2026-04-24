@@ -3,7 +3,7 @@ import type { MouseEvent } from 'react';
 import { useEffect, useState } from 'react';
 
 // Assets from /uploads (served from project root). Use POSIX paths for web compatibility.
-const logoSrc = '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/AON-high-resolution-logo-cutout.png';
+const logoSrc = '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/AON-high-resolution-logo-transparent.png';
 const bananaBeeFontUrl = '/uploads/banana-bee-font/banana-bee-font/BananaBee.otf';
 
 type NavigationProps = {
@@ -91,8 +91,29 @@ export function Navigation({ currentPath = '/', onNavigate }: NavigationProps) {
             .nav-title { font-family: 'Banana Bee', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
           `}</style>
 
-          <div className="mr-4 h-14 w-14 sm:h-16 sm:w-16 rounded-full overflow-hidden flex items-center justify-center bg-white/90 border border-border p-1">
-            <img src={logoSrc} alt="Art of Nature logo" className="h-full w-full object-cover" />
+          <div className="mr-4 h-14 w-14 sm:h-16 sm:w-16 rounded-full overflow-hidden flex items-center justify-center border border-border p-1">
+            <picture>
+              <source
+                type="image/webp"
+                srcSet={
+                  '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/AON-high-resolution-logo-transparent-48.webp 48w, ' +
+                  '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/AON-high-resolution-logo-transparent-96.webp 96w, ' +
+                  '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/AON-high-resolution-logo-transparent-192.webp 192w'
+                }
+                sizes="48px"
+              />
+
+              <img
+                src="/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/AON-high-resolution-logo-transparent-96.png"
+                srcSet={
+                  '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/AON-high-resolution-logo-transparent-48.png 48w, ' +
+                  '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/AON-high-resolution-logo-transparent-96.png 96w, ' +
+                  '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/AON-high-resolution-logo-transparent-192.png 192w'
+                }
+                alt="Art of Nature logo"
+                className="h-full w-full object-cover"
+              />
+            </picture>
           </div>
 
           <div className="text-sm font-bold uppercase tracking-[0.35em] text-foreground/75 sm:text-base nav-title">
