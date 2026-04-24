@@ -2,6 +2,10 @@ import { Menu, X } from 'lucide-react';
 import type { MouseEvent } from 'react';
 import { useEffect, useState } from 'react';
 
+// Assets from /uploads (served from project root). Use POSIX paths for web compatibility.
+const logoSrc = '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/AON-high-resolution-logo-cutout.png';
+const bananaBeeFontUrl = '/uploads/banana-bee-font/banana-bee-font/BananaBee.otf';
+
 type NavigationProps = {
   currentPath?: string;
   onNavigate?: (href: string) => void;
@@ -75,8 +79,23 @@ export function Navigation({ currentPath = '/', onNavigate }: NavigationProps) {
       }`}
     >
       <div className="section-shell flex items-center justify-between py-4 sm:py-5">
-        <a href={homeHref} className="min-w-0" onClick={(event) => handleNavigationClick(event, homeHref)}>
-          <div className="text-sm font-semibold uppercase tracking-[0.35em] text-foreground/75 sm:text-base">
+        <a href={homeHref} className="min-w-0 flex items-center" onClick={(event) => handleNavigationClick(event, homeHref)}>
+          <style>{`
+            @font-face {
+              font-family: 'Banana Bee';
+              src: url('${bananaBeeFontUrl}') format('opentype');
+              font-weight: normal;
+              font-style: normal;
+              font-display: swap;
+            }
+            .nav-title { font-family: 'Banana Bee', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
+          `}</style>
+
+          <div className="mr-4 h-14 w-14 sm:h-16 sm:w-16 rounded-full overflow-hidden flex items-center justify-center bg-white/90 border border-border p-1">
+            <img src={logoSrc} alt="Art of Nature logo" className="h-full w-full object-cover" />
+          </div>
+
+          <div className="text-sm font-bold uppercase tracking-[0.35em] text-foreground/75 sm:text-base nav-title">
             Art of Nature
           </div>
         </a>
