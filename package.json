@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "dev:ssr": "tsx server/index.ts",
     "test": "cross-env NODE_ENV=test tsx --test tests/**/*.test.ts tests/**/*.test.tsx",
-    "create:user": "tsx scripts/create-user.ts"
+    "create:user": "tsx scripts/create-user.ts",
+    "init:content": "tsx scripts/init-content.ts"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

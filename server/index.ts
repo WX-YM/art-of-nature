@@ -48,6 +48,11 @@ import {
   deleteUpload,
   deleteUploadFolder,
 } from './upload-service';
+import {
+  deleteGalleryCategoryRecord,
+  getRankedGalleryCategories,
+  upsertGalleryCategoryRecord,
+} from './structured-content-service';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -3892,6 +3897,15 @@ app.get('/api/gallery', async (_req, res, next) => {
   }
 });
 
+app.get('/api/gallery/categories', async (_req, res, next) => {
+  try {
+    const categories = await getRankedGalleryCategories();
+    res.json(categories);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/journal', async (_req, res, next) => {
   try {
     const journal = await getJournalContent();
@@ -4131,6 +4145,51 @@ app.put('/api/gallery', async (req, res, next) => {
     invalidatePageCache();
     res.json(saved);
   } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/gallery/categories', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const saved = await upsertGalleryCategoryRecord(req.body);
+    res.json(saved);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Invalid category payload.') {
+      res.status(400).json({ message: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.delete('/api/gallery/categories/:categoryId', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      respondHiddenNotFound(res);
+      return;
+    }
+
+    const deleted = await deleteGalleryCategoryRecord(req.params.categoryId);
+    res.json({ deleted });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Category not found.') {
+      res.status(404).json({ message: error.message });
+      return;
+    }
+
+    if (error instanceof Error && error.message === 'Invalid category identifier.') {
+      res.status(400).json({ message: error.message });
+      return;
+    }
+
     next(error);
   }
 });
