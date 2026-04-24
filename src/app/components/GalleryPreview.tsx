@@ -116,10 +116,13 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
               <div>
                 <p className="section-kicker mb-3">Editorial Note</p>
                 <h3 className="text-[2rem] leading-tight text-foreground sm:text-[2.5rem]">
-                  Built around proportion, surface, and quiet presence.
+                  A living archive of bespoke craftsmanship and material character.
                 </h3>
                 <p className="mt-4 text-sm leading-8 text-foreground/72 sm:text-base">
-                  The gallery is arranged as a collection of rooms rather than products, with each piece treated as part of a larger spatial story.
+                  This gallery is a showcase of Art of Nature&apos;s work across furniture, lighting, and handcrafted details, brought together as a record of making rather than a catalogue of products.
+                </p>
+                <p className="mt-4 text-sm leading-8 text-foreground/72 sm:text-base">
+                  Each piece is presented for its grain, form, finish, and atmosphere, so the collection reads as a body of craft shaped by patience, material honesty, and the character of the wood itself.
                 </p>
               </div>
               <a href="/gallery" className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-foreground transition-colors hover:text-accent">
