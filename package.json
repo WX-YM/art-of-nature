@@ -11,7 +11,8 @@
     "dev:ssr": "tsx server/index.ts",
     "test": "cross-env NODE_ENV=test tsx --test tests/**/*.test.ts tests/**/*.test.tsx",
     "create:user": "tsx scripts/create-user.ts",
-    "init:content": "tsx scripts/init-content.ts"
+    "init:content": "tsx scripts/init-content.ts",
+    "import:photography": "tsx scripts/import-photography-gallery.ts"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
