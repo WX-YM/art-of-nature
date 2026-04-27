@@ -20,4 +20,12 @@
   Create/update an admin user with:
 
   `npm run create:user -- --user "Admin" --email "admin@example.com" --password "your-secret"`
+
+  ## Production Data Migration
+
+  For production-safe database migration, do not use the seed/import scripts.
+
+  Use the dedicated runbook instead:
+
+  [PRODUCTION_DATA_MIGRATION_RUNBOOK.md](./PRODUCTION_DATA_MIGRATION_RUNBOOK.md)
   

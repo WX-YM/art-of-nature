@@ -35,7 +35,7 @@ after(async () => {
   await mongoose.disconnect();
 });
 
-test('admin dashboard script parses successfully and uses the slimmer upload API', async () => {
+test('admin dashboard script parses successfully and renders per-image gallery and journal controls', async () => {
   await UserModel.findOneAndUpdate(
     { email: 'kekomhgad@gmail.com' },
     {
@@ -87,4 +87,35 @@ test('admin dashboard script parses successfully and uses the slimmer upload API
 
   const scriptSource = `(function () {${scriptMatch![1]}})();`;
   assert.doesNotThrow(() => new Script(scriptSource));
+
+  const galleryResponse = await fetch(`${baseUrl}/admin?tab=gallery`, {
+    headers: {
+      cookie: cookieHeader!,
+    },
+  });
+  assert.equal(galleryResponse.status, 200);
+  const galleryHtml = await galleryResponse.text();
+  assert.match(galleryHtml, /data-remove-gallery-image=/);
+  assert.match(galleryHtml, /data-move-gallery-image=/);
+  assert.match(galleryHtml, /data-edit-gallery-image=/);
+  assert.match(galleryHtml, /data-add-gallery-image-url/);
+  assert.match(galleryHtml, /data-focus-upload-field="newImageUrl"/);
+  assert.match(galleryHtml, /Replace frame|Edit frame/);
+  assert.match(galleryHtml, /Use as cover/);
+  assert.match(galleryHtml, /Move left/);
+  assert.match(galleryHtml, /Move right/);
+  assert.match(galleryHtml, /Remove image/);
+
+  const journalResponse = await fetch(`${baseUrl}/admin?tab=journal`, {
+    headers: {
+      cookie: cookieHeader!,
+    },
+  });
+  assert.equal(journalResponse.status, 200);
+  const journalHtml = await journalResponse.text();
+  assert.match(journalHtml, /data-remove-journal-image=/);
+  assert.match(journalHtml, /data-move-journal-image=/);
+  assert.match(journalHtml, /data-edit-journal-image=/);
+  assert.match(journalHtml, /data-add-journal-image-url/);
+  assert.match(journalHtml, /data-focus-upload-field="newGalleryImageUrl"/);
 });

@@ -1104,36 +1104,43 @@ app.get('/admin', async (req, res, next) => {
       .gallery-piece-body { border-top: 1px solid var(--admin-border); padding: 1rem 1.1rem 1.2rem; }
       .piece-grid { display: grid; gap: 0.85rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .piece-grid .full { grid-column: 1 / -1; }
-      .gallery-piece-preview-strip { display: grid; gap: 0.55rem; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); }
+      .gallery-piece-preview-strip { display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); align-items: start; }
       .gallery-piece-preview {
         border: 1px solid var(--admin-border);
         border-radius: 14px;
         overflow: hidden;
         background: rgba(255,255,255,0.9);
+        min-width: 0;
       }
       .gallery-piece-preview.is-cover {
         border-color: var(--admin-accent-dark);
         box-shadow: 0 0 0 1px rgba(45, 41, 38, 0.16);
       }
-      .gallery-piece-preview img { display: block; width: 100%; height: 92px; object-fit: cover; background: #f3f4f6; }
+      .gallery-piece-preview img { display: block; width: 100%; height: 132px; object-fit: cover; background: #f3f4f6; }
       .gallery-piece-preview-actions {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.5rem;
+        display: grid;
+        gap: 0.45rem;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         border-top: 1px solid var(--admin-border);
-        padding: 0.55rem 0.7rem;
+        padding: 0.7rem;
       }
       .gallery-piece-preview-label {
+        grid-column: 1 / -1;
         color: var(--admin-muted);
         font-size: 0.68rem;
         letter-spacing: 0.2em;
         text-transform: uppercase;
+        line-height: 1.5;
       }
       .gallery-piece-preview-button {
-        padding: 0.45rem 0.7rem;
-        font-size: 0.68rem;
-        letter-spacing: 0.16em;
+        width: 100%;
+        min-height: 2.4rem;
+        padding: 0.55rem 0.65rem;
+        font-size: 0.64rem;
+        letter-spacing: 0.12em;
+        line-height: 1.35;
+        white-space: normal;
+        text-align: center;
       }
       .gallery-piece-preview-count,
       .gallery-piece-preview-empty {
@@ -1563,7 +1570,7 @@ app.get('/admin', async (req, res, next) => {
           <p style="margin:0;"><button type="button" id="create-upload-folder" class="ghost-button">Create Folder</button></p>
           <p style="margin:0;"><button type="button" id="uploads-go-root" class="ghost-button">Open Root</button></p>
           <p style="margin:0;"><button type="button" id="uploads-go-parent" class="ghost-button">Up One Level</button></p>
-          <p class="upload-help" style="margin:0;">Select an Image URLs field in a piece, then use Insert to append a URL.</p>
+          <p class="upload-help" style="margin:0;">Select an Add Image URL or Image URLs field in a piece, then use Insert to place a URL without editing the full list manually.</p>
         </div>
         <p class="upload-help" id="upload-status">Upload a new image or reuse an existing URL from the archive below when editing a gallery piece.</p>
         <div id="uploads-pathbar" class="uploads-pathbar"></div>
@@ -1650,7 +1657,7 @@ app.get('/admin', async (req, res, next) => {
           <p style="margin:0;"><button type="button" id="create-upload-folder" class="ghost-button">Create Folder</button></p>
           <p style="margin:0;"><button type="button" id="uploads-go-root" class="ghost-button">Open Root</button></p>
           <p style="margin:0;"><button type="button" id="uploads-go-parent" class="ghost-button">Up One Level</button></p>
-          <p class="upload-help" style="margin:0;">Click into a Journal cover image or Gallery Images field first, then use Insert.</p>
+          <p class="upload-help" style="margin:0;">Click into an Add Image URL, cover image, or Gallery Images field first, then use Insert.</p>
         </div>
         <p class="upload-help" id="upload-status">Upload a new image or reuse existing archive URLs while editing journal entries.</p>
         <div id="uploads-pathbar" class="uploads-pathbar"></div>
@@ -1762,6 +1769,8 @@ app.get('/admin', async (req, res, next) => {
         let cachedUploadEntries = [];
         let currentUploadsPath = '';
         let lastFocusedUploadField = null;
+        let pendingGalleryImageEdit = null;
+        let pendingJournalImageEdit = null;
 
         function escapeHtmlValue(value) {
           return String(value || '')
@@ -1842,7 +1851,11 @@ app.get('/admin', async (req, res, next) => {
         }
 
         function syncGalleryFolderFromFocusedPiece() {
-          if (!(lastFocusedUploadField instanceof HTMLTextAreaElement) || !galleryEditorEl || !galleryEditorEl.contains(lastFocusedUploadField)) {
+          if (
+            !(lastFocusedUploadField instanceof HTMLTextAreaElement || lastFocusedUploadField instanceof HTMLInputElement) ||
+            !galleryEditorEl ||
+            !galleryEditorEl.contains(lastFocusedUploadField)
+          ) {
             return false;
           }
 
@@ -1959,26 +1972,167 @@ app.get('/admin', async (req, res, next) => {
             return '<div class="gallery-piece-preview-empty">No images linked yet.</div>';
           }
 
-          const previewCards = imageUrls
-            .slice(0, 6)
+          return imageUrls
             .map(function (url, index) {
               const safeUrl = escapeHtmlValue(url);
               const isCover = url === coverImageUrl;
+              const moveLeftDisabled = index === 0 ? 'disabled' : '';
+              const moveRightDisabled = index === imageUrls.length - 1 ? 'disabled' : '';
               return '<div class="gallery-piece-preview' + (isCover ? ' is-cover' : '') + '">' +
                 '<img src="' + safeUrl + '" alt="Preview image ' + (index + 1) + '" loading="lazy" />' +
                 '<div class="gallery-piece-preview-actions">' +
                   '<span class="gallery-piece-preview-label">' + (isCover ? 'Cover frame' : 'Frame ' + (index + 1)) + '</span>' +
                   '<button type="button" class="ghost-button gallery-piece-preview-button" data-set-cover="' + safeUrl + '">' + (isCover ? 'Selected' : 'Use as cover') + '</button>' +
+                  '<button type="button" class="ghost-button gallery-piece-preview-button" data-edit-gallery-image="' + index + '">Edit frame</button>' +
+                  '<button type="button" class="ghost-button gallery-piece-preview-button" data-move-gallery-image="' + index + '" data-move-gallery-image-direction="-1" ' + moveLeftDisabled + '>Move left</button>' +
+                  '<button type="button" class="ghost-button gallery-piece-preview-button" data-move-gallery-image="' + index + '" data-move-gallery-image-direction="1" ' + moveRightDisabled + '>Move right</button>' +
+                  '<button type="button" class="ghost-button gallery-piece-preview-button" data-remove-gallery-image="' + index + '">Remove image</button>' +
                 '</div>' +
               '</div>';
             })
             .join('');
+        }
 
-          const overflowBadge = imageUrls.length > 6
-            ? '<div class="gallery-piece-preview-count">+' + (imageUrls.length - 6) + ' more image' + (imageUrls.length - 6 === 1 ? '' : 's') + '</div>'
-            : '';
+        function readUrlListValue(field, options) {
+          if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) {
+            return [];
+          }
 
-          return previewCards + overflowBadge;
+          const dedupe = options && options.dedupe === true;
+          const seen = new Set();
+          return String(field.value || '')
+            .split(/\\r?\\n/)
+            .map(function (line) { return line.trim(); })
+            .filter(Boolean)
+            .filter(function (url) {
+              if (!dedupe) {
+                return true;
+              }
+
+              if (seen.has(url)) {
+                return false;
+              }
+
+              seen.add(url);
+              return true;
+            });
+        }
+
+        function writeUrlListValue(field, urls, options) {
+          if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) {
+            return [];
+          }
+
+          const dedupe = options && options.dedupe === true;
+          const nextUrls = [];
+          const seen = new Set();
+
+          (Array.isArray(urls) ? urls : []).forEach(function (url) {
+            const normalized = String(url || '').trim();
+            if (!normalized) {
+              return;
+            }
+
+            if (dedupe) {
+              if (seen.has(normalized)) {
+                return;
+              }
+
+              seen.add(normalized);
+            }
+
+            nextUrls.push(normalized);
+          });
+
+          field.value = nextUrls.join('\\n');
+          return nextUrls;
+        }
+
+        function getCoverAfterRemovingImage(imageUrls, currentCoverUrl, removedIndex) {
+          if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
+            return '';
+          }
+
+          const normalizedRemovedIndex = Number.isInteger(removedIndex) ? removedIndex : -1;
+          const removedUrl = normalizedRemovedIndex >= 0 ? imageUrls[normalizedRemovedIndex] : '';
+          const nextUrls = imageUrls.filter(function (_url, index) {
+            return index !== normalizedRemovedIndex;
+          });
+
+          if (nextUrls.length === 0) {
+            return '';
+          }
+
+          if (currentCoverUrl && currentCoverUrl !== removedUrl && nextUrls.includes(currentCoverUrl)) {
+            return currentCoverUrl;
+          }
+
+          return nextUrls[normalizedRemovedIndex] || nextUrls[normalizedRemovedIndex - 1] || nextUrls[0] || '';
+        }
+
+        function moveImageInList(imageUrls, index, direction) {
+          if (!Array.isArray(imageUrls)) {
+            return [];
+          }
+
+          const currentIndex = Number(index);
+          const nextIndex = currentIndex + Number(direction);
+          if (
+            !Number.isInteger(currentIndex) ||
+            !Number.isInteger(nextIndex) ||
+            currentIndex < 0 ||
+            nextIndex < 0 ||
+            currentIndex >= imageUrls.length ||
+            nextIndex >= imageUrls.length
+          ) {
+            return imageUrls.slice();
+          }
+
+          const nextUrls = imageUrls.slice();
+          const movedImage = nextUrls[currentIndex];
+          nextUrls[currentIndex] = nextUrls[nextIndex];
+          nextUrls[nextIndex] = movedImage;
+          return nextUrls;
+        }
+
+        function getGalleryCardImageFields(card) {
+          if (!(card instanceof HTMLElement)) {
+            return null;
+          }
+
+          const coverImageUrlField = card.querySelector('[data-field="coverImageUrl"]');
+          const imageUrlsField = card.querySelector('[data-field="imageUrls"]');
+          const newImageUrlField = card.querySelector('[data-field="newImageUrl"]');
+
+          if (!(coverImageUrlField instanceof HTMLInputElement) || !(imageUrlsField instanceof HTMLTextAreaElement)) {
+            return null;
+          }
+
+          return {
+            coverImageUrlField: coverImageUrlField,
+            imageUrlsField: imageUrlsField,
+            newImageUrlField: newImageUrlField instanceof HTMLInputElement ? newImageUrlField : null,
+          };
+        }
+
+        function getJournalCardImageFields(card) {
+          if (!(card instanceof HTMLElement)) {
+            return null;
+          }
+
+          const coverImageUrlField = card.querySelector('[data-field="coverImageUrl"]');
+          const galleryImageUrlsField = card.querySelector('[data-field="galleryImageUrls"]');
+          const newImageUrlField = card.querySelector('[data-field="newGalleryImageUrl"]');
+
+          if (!(coverImageUrlField instanceof HTMLInputElement) || !(galleryImageUrlsField instanceof HTMLTextAreaElement)) {
+            return null;
+          }
+
+          return {
+            coverImageUrlField: coverImageUrlField,
+            galleryImageUrlsField: galleryImageUrlsField,
+            newImageUrlField: newImageUrlField instanceof HTMLInputElement ? newImageUrlField : null,
+          };
         }
 
         function readPiecesFromDom() {
@@ -2073,6 +2227,12 @@ app.get('/admin', async (req, res, next) => {
               const summaryTitle = normalized.title || 'Untitled piece';
               const summaryMeta = normalized.category + ' / ' + normalized.subcategory + ' / ' + imageCount + ' image' + (imageCount === 1 ? '' : 's');
               const previewMarkup = buildPiecePreviewMarkup(normalized.imageUrls, normalized.coverImageUrl);
+              const hasPendingImageEdit = pendingGalleryImageEdit && pendingGalleryImageEdit.pieceIndex === entry.pieceIndex;
+              const pendingImageUrl = hasPendingImageEdit ? pendingGalleryImageEdit.url : '';
+              const imageUrlButtonLabel = hasPendingImageEdit ? 'Replace frame' : 'Add URL';
+              const imageUrlHelp = hasPendingImageEdit
+                ? 'Editing frame ' + (pendingGalleryImageEdit.imageIndex + 1) + '. Paste a new URL or use the library, then press Replace frame.'
+                : 'Paste one image URL or use the library to add another frame.';
 
               return '<details class="gallery-piece-card" data-piece-card data-piece-index="' + entry.pieceIndex + '" ' + (visibleIndex < 1 ? 'open' : '') + '>' +
                 '<summary>' +
@@ -2091,8 +2251,9 @@ app.get('/admin', async (req, res, next) => {
                     '<p><label>Category<br /><select data-field="category">' + categoryOptionsMarkup(normalized.category) + '</select></label></p>' +
                     '<p><label>Subcategory<br /><select data-field="subcategory">' + getSubcategoryOptions(normalized.category, normalized.subcategory) + '</select></label></p>' +
                     '<p class="full"><label>Note<br /><textarea data-field="note" style="min-height:120px;">' + escapeHtmlValue(normalized.note) + '</textarea></label></p>' +
-                    '<div class="full"><label>Cover Image</label><p class="upload-help" style="margin:0 0 0.75rem 0;">Choose which frame leads on the homepage, room cards, and archive viewer entry point.</p><div class="gallery-piece-preview-strip">' + previewMarkup + '</div></div>' +
-                    '<p class="full"><label>Image URLs (one per line)<br /><textarea data-field="imageUrls" style="min-height:150px;">' + escapeHtmlValue(normalized.imageUrls.join('\\n')) + '</textarea></label></p>' +
+                    '<div class="full"><label>Cover Image</label><p class="upload-help" style="margin:0 0 0.75rem 0;">Choose which frame leads on the homepage, room cards, and archive viewer entry point. You can also reorder frames or remove one image at a time here.</p><div class="gallery-piece-preview-strip">' + previewMarkup + '</div></div>' +
+                    '<div class="full journal-field-stack"><label>Add Image URL<br /><input data-field="newImageUrl" data-upload-mode="replace" placeholder="' + escapeHtmlValue(imageUrlHelp) + '" value="' + escapeHtmlValue(pendingImageUrl) + '" /></label><div class="journal-upload-row"><button type="button" class="ghost-button" data-add-gallery-image-url>' + imageUrlButtonLabel + '</button><button type="button" class="ghost-button" data-focus-upload-field="newImageUrl">Use Library</button>' + (hasPendingImageEdit ? '<button type="button" class="ghost-button" data-clear-gallery-image-edit>Cancel edit</button>' : '') + '</div></div>' +
+                    '<p class="full"><label>Image URLs (one per line)<br /><textarea data-field="imageUrls" data-upload-mode="append" style="min-height:150px;">' + escapeHtmlValue(normalized.imageUrls.join('\\n')) + '</textarea></label></p>' +
                     '<p class="full"><label class="checkbox-row"><input type="checkbox" data-field="featured" ' + (normalized.featured ? 'checked' : '') + ' /> Featured on homepage portfolio section</label></p>' +
                   '</div>' +
                 '</div>' +
@@ -2218,15 +2379,20 @@ app.get('/admin', async (req, res, next) => {
           }
 
           return images
-            .slice(0, 6)
             .map(function (url, index) {
               const safeUrl = escapeHtmlValue(url);
               const isCover = url === post.coverImageUrl;
+              const moveLeftDisabled = index === 0 ? 'disabled' : '';
+              const moveRightDisabled = index === images.length - 1 ? 'disabled' : '';
               return '<div class="gallery-piece-preview' + (isCover ? ' is-cover' : '') + '">' +
                 '<img src="' + safeUrl + '" alt="Preview image ' + (index + 1) + '" loading="lazy" />' +
                 '<div class="gallery-piece-preview-actions">' +
                   '<span class="gallery-piece-preview-label">' + (isCover ? 'Cover frame' : 'Frame ' + (index + 1)) + '</span>' +
                   '<button type="button" class="ghost-button gallery-piece-preview-button" data-set-journal-cover="' + safeUrl + '">' + (isCover ? 'Selected' : 'Use as cover') + '</button>' +
+                  '<button type="button" class="ghost-button gallery-piece-preview-button" data-edit-journal-image="' + index + '">Edit frame</button>' +
+                  '<button type="button" class="ghost-button gallery-piece-preview-button" data-move-journal-image="' + index + '" data-move-journal-image-direction="-1" ' + moveLeftDisabled + '>Move left</button>' +
+                  '<button type="button" class="ghost-button gallery-piece-preview-button" data-move-journal-image="' + index + '" data-move-journal-image-direction="1" ' + moveRightDisabled + '>Move right</button>' +
+                  '<button type="button" class="ghost-button gallery-piece-preview-button" data-remove-journal-image="' + index + '">Remove image</button>' +
                 '</div>' +
               '</div>';
             })
@@ -2321,6 +2487,12 @@ app.get('/admin', async (req, res, next) => {
                 normalized.category + ' / ' + normalized.publishedAt + (normalized.published ? ' / published' : ' / draft');
               const previewMarkup = buildJournalPreviewMarkup(normalized);
               const previewCardMarkup = buildJournalPreviewCardMarkup(normalized);
+              const hasPendingImageEdit = pendingJournalImageEdit && pendingJournalImageEdit.postIndex === entry.postIndex;
+              const pendingImageUrl = hasPendingImageEdit ? pendingJournalImageEdit.url : '';
+              const imageUrlButtonLabel = hasPendingImageEdit ? 'Replace frame' : 'Add URL';
+              const imageUrlHelp = hasPendingImageEdit
+                ? 'Editing frame ' + (pendingJournalImageEdit.imageIndex + 1) + '. Paste a new URL or use the library, then press Replace frame.'
+                : 'Paste one image URL or use the library to add another frame.';
 
               return '<details class="gallery-piece-card" data-journal-card data-post-index="' + entry.postIndex + '" ' + (visibleIndex < 1 ? 'open' : '') + '>' +
                 '<summary>' +
@@ -2346,7 +2518,8 @@ app.get('/admin', async (req, res, next) => {
                     '<p class="full"><label>Excerpt<br /><textarea data-field="excerpt" style="min-height:110px;">' + escapeHtmlValue(normalized.excerpt) + '</textarea></label></p>' +
                     '<div class="journal-field-stack"><label>Cover Image URL<br /><input data-field="coverImageUrl" data-upload-mode="replace" value="' + escapeHtmlValue(normalized.coverImageUrl) + '" /></label><div class="journal-upload-row"><input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" data-journal-upload-file="cover" /><button type="button" class="ghost-button" data-upload-journal-field="cover">Upload Cover</button><button type="button" class="ghost-button" data-focus-upload-field="coverImageUrl">Use Library</button></div></div>' +
                     '<p><label>Cover Image Alt<br /><input data-field="coverImageAlt" value="' + escapeHtmlValue(normalized.coverImageAlt) + '" /></label></p>' +
-                    '<div class="full"><label>Image Selection</label><p class="upload-help" style="margin:0 0 0.75rem 0;">Choose the frame that leads the article, cards, and journal preview.</p><div class="gallery-piece-preview-strip">' + previewMarkup + '</div></div>' +
+                    '<div class="full"><label>Image Selection</label><p class="upload-help" style="margin:0 0 0.75rem 0;">Choose the frame that leads the article, cards, and journal preview. You can reorder frames or remove a single image here.</p><div class="gallery-piece-preview-strip">' + previewMarkup + '</div></div>' +
+                    '<div class="full journal-field-stack"><label>Add Image URL<br /><input data-field="newGalleryImageUrl" data-upload-mode="replace" placeholder="' + escapeHtmlValue(imageUrlHelp) + '" value="' + escapeHtmlValue(pendingImageUrl) + '" /></label><div class="journal-upload-row"><button type="button" class="ghost-button" data-add-journal-image-url>' + imageUrlButtonLabel + '</button><button type="button" class="ghost-button" data-focus-upload-field="newGalleryImageUrl">Use Library</button>' + (hasPendingImageEdit ? '<button type="button" class="ghost-button" data-clear-journal-image-edit>Cancel edit</button>' : '') + '</div></div>' +
                     '<div class="full journal-field-stack"><label>Gallery Images (one per line)<br /><textarea data-field="galleryImageUrls" data-upload-mode="append" style="min-height:140px;">' + escapeHtmlValue(normalized.galleryImageUrls.join('\\n')) + '</textarea></label><div class="journal-upload-row"><input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" data-journal-upload-file="gallery" multiple /><button type="button" class="ghost-button" data-upload-journal-field="gallery">Upload To Gallery</button><button type="button" class="ghost-button" data-focus-upload-field="galleryImageUrls">Use Library</button></div></div>' +
                     '<div class="full"><label>Body</label><div class="body-tools"><button type="button" class="ghost-button" data-insert-body-snippet="heading">Heading</button><button type="button" class="ghost-button" data-insert-body-snippet="quote">Quote</button><button type="button" class="ghost-button" data-insert-body-snippet="list">List</button><button type="button" class="ghost-button" data-insert-body-snippet="break">Paragraph Break</button></div><textarea data-field="body" style="min-height:240px;">' + escapeHtmlValue(normalized.body) + '</textarea></div>' +
                     '<p><label class="checkbox-row"><input type="checkbox" data-field="published" ' + (normalized.published ? 'checked' : '') + ' /> Published on public site</label></p>' +
@@ -3043,11 +3216,181 @@ app.get('/admin', async (req, res, next) => {
             setStatus('Cover image updated for this piece.', false);
           });
 
+          galleryEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const editImageButton = event.target.closest('[data-edit-gallery-image]');
+            if (editImageButton) {
+              event.preventDefault();
+              const card = editImageButton.closest('[data-piece-card]');
+              const fields = getGalleryCardImageFields(card);
+              const imageIndex = Number(editImageButton.getAttribute('data-edit-gallery-image'));
+              const currentUrls = fields ? readUrlListValue(fields.imageUrlsField) : [];
+
+              if (!fields || !Number.isInteger(imageIndex) || imageIndex < 0 || imageIndex >= currentUrls.length) {
+                return;
+              }
+
+              pendingGalleryImageEdit = {
+                pieceIndex: Number(card.getAttribute('data-piece-index')),
+                imageIndex: imageIndex,
+                url: currentUrls[imageIndex],
+              };
+              renderGalleryEditor();
+              setStatus('Frame selected for editing. Paste a new URL or use the library, then press Replace frame.', false);
+              return;
+            }
+
+            const clearEditButton = event.target.closest('[data-clear-gallery-image-edit]');
+            if (clearEditButton) {
+              event.preventDefault();
+              pendingGalleryImageEdit = null;
+              renderGalleryEditor();
+              setStatus('Frame edit canceled.', false);
+              return;
+            }
+
+            const moveButton = event.target.closest('[data-move-gallery-image]');
+            if (!moveButton) {
+              return;
+            }
+
+            event.preventDefault();
+            const card = moveButton.closest('[data-piece-card]');
+            const fields = getGalleryCardImageFields(card);
+            const direction = Number(moveButton.getAttribute('data-move-gallery-image-direction'));
+            const imageIndex = Number(moveButton.getAttribute('data-move-gallery-image'));
+
+            if (!fields) {
+              return;
+            }
+
+            const nextUrls = moveImageInList(readUrlListValue(fields.imageUrlsField), imageIndex, direction);
+            writeUrlListValue(fields.imageUrlsField, nextUrls);
+            syncVisiblePiecesIntoState();
+            renderGalleryEditor();
+            setStatus('Gallery image order updated for this piece.', false);
+          });
+
+          galleryEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const removeImageButton = event.target.closest('[data-remove-gallery-image]');
+            if (!removeImageButton) {
+              return;
+            }
+
+            event.preventDefault();
+            const card = removeImageButton.closest('[data-piece-card]');
+            const fields = getGalleryCardImageFields(card);
+            const imageIndex = Number(removeImageButton.getAttribute('data-remove-gallery-image'));
+
+            if (!fields) {
+              return;
+            }
+
+            const currentUrls = readUrlListValue(fields.imageUrlsField);
+            if (!Number.isInteger(imageIndex) || imageIndex < 0 || imageIndex >= currentUrls.length) {
+              return;
+            }
+
+            fields.coverImageUrlField.value = getCoverAfterRemovingImage(
+              currentUrls,
+              fields.coverImageUrlField.value.trim(),
+              imageIndex
+            );
+            writeUrlListValue(
+              fields.imageUrlsField,
+              currentUrls.filter(function (_url, currentIndex) {
+                return currentIndex !== imageIndex;
+              })
+            );
+            syncVisiblePiecesIntoState();
+            renderGalleryEditor();
+            setStatus('Removed one image from this gallery piece.', false);
+          });
+
+          galleryEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const addUrlButton = event.target.closest('[data-add-gallery-image-url]');
+            if (!addUrlButton) {
+              return;
+            }
+
+            event.preventDefault();
+            const card = addUrlButton.closest('[data-piece-card]');
+            const fields = getGalleryCardImageFields(card);
+            if (!fields || !(fields.newImageUrlField instanceof HTMLInputElement)) {
+              return;
+            }
+
+            const nextUrl = fields.newImageUrlField.value.trim();
+            if (!nextUrl) {
+              setStatus('Paste an image URL first, then add it to this piece.', true);
+              return;
+            }
+
+            const nextImageUrls = readUrlListValue(fields.imageUrlsField);
+            const pieceIndex = Number(card.getAttribute('data-piece-index'));
+            const replaceIndex =
+              pendingGalleryImageEdit && pendingGalleryImageEdit.pieceIndex === pieceIndex
+                ? pendingGalleryImageEdit.imageIndex
+                : -1;
+
+            if (Number.isInteger(replaceIndex) && replaceIndex >= 0 && replaceIndex < nextImageUrls.length) {
+              nextImageUrls[replaceIndex] = nextUrl;
+            } else if (!nextImageUrls.includes(nextUrl)) {
+              nextImageUrls.push(nextUrl);
+            }
+            writeUrlListValue(fields.imageUrlsField, nextImageUrls);
+            if (Number.isInteger(replaceIndex) && replaceIndex >= 0 && fields.coverImageUrlField.value.trim() === pendingGalleryImageEdit.url) {
+              fields.coverImageUrlField.value = nextUrl;
+            } else if (!fields.coverImageUrlField.value.trim()) {
+              fields.coverImageUrlField.value = nextUrl;
+            }
+            fields.newImageUrlField.value = '';
+            pendingGalleryImageEdit = null;
+            syncVisiblePiecesIntoState();
+            renderGalleryEditor();
+            setStatus(Number.isInteger(replaceIndex) && replaceIndex >= 0 ? 'Frame updated for this gallery piece.' : 'Image URL added to this gallery piece.', false);
+          });
+
+          galleryEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const focusButton = event.target.closest('[data-focus-upload-field]');
+            if (!focusButton) {
+              return;
+            }
+
+            event.preventDefault();
+            const card = focusButton.closest('[data-piece-card]');
+            const fieldName = focusButton.getAttribute('data-focus-upload-field');
+            const field = card && card.querySelector('[data-field="' + fieldName + '"]');
+            if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) {
+              return;
+            }
+
+            lastFocusedUploadField = field;
+            field.focus();
+            syncGalleryFolderFromFocusedPiece();
+            setStatus('Field selected. Choose an image from the archive below and press Insert.', false);
+          });
+
           galleryEditorEl.addEventListener('focusin', function (event) {
             const target = event.target;
             if (
-              target instanceof HTMLTextAreaElement &&
-              target.getAttribute('data-field') === 'imageUrls'
+              (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) &&
+              typeof target.getAttribute('data-upload-mode') === 'string'
             ) {
               lastFocusedUploadField = target;
               syncGalleryFolderFromFocusedPiece();
@@ -3060,6 +3403,12 @@ app.get('/admin', async (req, res, next) => {
               if (
                 target instanceof HTMLTextAreaElement &&
                 target.getAttribute('data-field') === 'imageUrls'
+              ) {
+                syncVisiblePiecesIntoState();
+                renderGalleryEditor();
+              } else if (
+                target instanceof HTMLInputElement &&
+                target.getAttribute('data-field') === 'coverImageUrl'
               ) {
                 syncVisiblePiecesIntoState();
                 renderGalleryEditor();
@@ -3301,6 +3650,153 @@ app.get('/admin', async (req, res, next) => {
             syncVisibleJournalPostsIntoState();
             renderJournalEditor();
             setStatus('Cover image updated for this journal post.', false);
+          });
+
+          journalEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const editImageButton = event.target.closest('[data-edit-journal-image]');
+            if (editImageButton) {
+              event.preventDefault();
+              const card = editImageButton.closest('[data-journal-card]');
+              const fields = getJournalCardImageFields(card);
+              const imageIndex = Number(editImageButton.getAttribute('data-edit-journal-image'));
+              const currentUrls = fields ? readUrlListValue(fields.galleryImageUrlsField, { dedupe: true }) : [];
+
+              if (!fields || !Number.isInteger(imageIndex) || imageIndex < 0 || imageIndex >= currentUrls.length) {
+                return;
+              }
+
+              pendingJournalImageEdit = {
+                postIndex: Number(card.getAttribute('data-post-index')),
+                imageIndex: imageIndex,
+                url: currentUrls[imageIndex],
+              };
+              renderJournalEditor();
+              setStatus('Frame selected for editing. Paste a new URL or use the library, then press Replace frame.', false);
+              return;
+            }
+
+            const clearEditButton = event.target.closest('[data-clear-journal-image-edit]');
+            if (clearEditButton) {
+              event.preventDefault();
+              pendingJournalImageEdit = null;
+              renderJournalEditor();
+              setStatus('Frame edit canceled.', false);
+              return;
+            }
+
+            const moveButton = event.target.closest('[data-move-journal-image]');
+            if (!moveButton) {
+              return;
+            }
+
+            event.preventDefault();
+            const card = moveButton.closest('[data-journal-card]');
+            const fields = getJournalCardImageFields(card);
+            const direction = Number(moveButton.getAttribute('data-move-journal-image-direction'));
+            const imageIndex = Number(moveButton.getAttribute('data-move-journal-image'));
+
+            if (!fields) {
+              return;
+            }
+
+            const nextUrls = moveImageInList(readUrlListValue(fields.galleryImageUrlsField, { dedupe: true }), imageIndex, direction);
+            writeUrlListValue(fields.galleryImageUrlsField, nextUrls, { dedupe: true });
+            syncVisibleJournalPostsIntoState();
+            renderJournalEditor();
+            setStatus('Journal image order updated for this post.', false);
+          });
+
+          journalEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const removeImageButton = event.target.closest('[data-remove-journal-image]');
+            if (!removeImageButton) {
+              return;
+            }
+
+            event.preventDefault();
+            const card = removeImageButton.closest('[data-journal-card]');
+            const fields = getJournalCardImageFields(card);
+            const imageIndex = Number(removeImageButton.getAttribute('data-remove-journal-image'));
+
+            if (!fields) {
+              return;
+            }
+
+            const currentUrls = readUrlListValue(fields.galleryImageUrlsField, { dedupe: true });
+            if (!Number.isInteger(imageIndex) || imageIndex < 0 || imageIndex >= currentUrls.length) {
+              return;
+            }
+
+            fields.coverImageUrlField.value = getCoverAfterRemovingImage(
+              currentUrls,
+              fields.coverImageUrlField.value.trim(),
+              imageIndex
+            );
+            writeUrlListValue(
+              fields.galleryImageUrlsField,
+              currentUrls.filter(function (_url, currentIndex) {
+                return currentIndex !== imageIndex;
+              }),
+              { dedupe: true }
+            );
+            syncVisibleJournalPostsIntoState();
+            renderJournalEditor();
+            setStatus('Removed one image from this journal post.', false);
+          });
+
+          journalEditorEl.addEventListener('click', function (event) {
+            if (!(event.target instanceof Element)) {
+              return;
+            }
+
+            const addUrlButton = event.target.closest('[data-add-journal-image-url]');
+            if (!addUrlButton) {
+              return;
+            }
+
+            event.preventDefault();
+            const card = addUrlButton.closest('[data-journal-card]');
+            const fields = getJournalCardImageFields(card);
+            if (!fields || !(fields.newImageUrlField instanceof HTMLInputElement)) {
+              return;
+            }
+
+            const nextUrl = fields.newImageUrlField.value.trim();
+            if (!nextUrl) {
+              setStatus('Paste an image URL first, then add it to this journal post.', true);
+              return;
+            }
+
+            const nextImageUrls = readUrlListValue(fields.galleryImageUrlsField, { dedupe: true });
+            const postIndex = Number(card.getAttribute('data-post-index'));
+            const replaceIndex =
+              pendingJournalImageEdit && pendingJournalImageEdit.postIndex === postIndex
+                ? pendingJournalImageEdit.imageIndex
+                : -1;
+
+            if (Number.isInteger(replaceIndex) && replaceIndex >= 0 && replaceIndex < nextImageUrls.length) {
+              nextImageUrls[replaceIndex] = nextUrl;
+            } else if (!nextImageUrls.includes(nextUrl)) {
+              nextImageUrls.push(nextUrl);
+            }
+            writeUrlListValue(fields.galleryImageUrlsField, nextImageUrls, { dedupe: true });
+            if (Number.isInteger(replaceIndex) && replaceIndex >= 0 && fields.coverImageUrlField.value.trim() === pendingJournalImageEdit.url) {
+              fields.coverImageUrlField.value = nextUrl;
+            } else if (!fields.coverImageUrlField.value.trim()) {
+              fields.coverImageUrlField.value = nextUrl;
+            }
+            fields.newImageUrlField.value = '';
+            pendingJournalImageEdit = null;
+            syncVisibleJournalPostsIntoState();
+            renderJournalEditor();
+            setStatus(Number.isInteger(replaceIndex) && replaceIndex >= 0 ? 'Frame updated for this journal post.' : 'Image URL added to this journal post.', false);
           });
 
           journalEditorEl.addEventListener('click', async function (event) {
