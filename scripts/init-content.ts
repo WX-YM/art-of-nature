@@ -24,6 +24,7 @@ async function run() {
       `Subcategories: ${seeded.subcategories.length}`,
       `Gallery items: ${seeded.galleryItems.length}`,
       `Journal posts: ${seeded.journalPosts.length}`,
+      'Source: seed snapshot if present, otherwise code defaults.',
       collectionsOnly ? 'Legacy content docs were skipped.' : 'Legacy content docs were synced.',
     ].join(' ')
   );

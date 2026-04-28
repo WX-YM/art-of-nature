@@ -12,6 +12,7 @@ import {
 } from '../src/app/lib/journal';
 import { defaultContactContent } from '../src/app/lib/contactContent';
 import { defaultCraftsmanshipContent } from '../src/app/lib/craftsmanshipContent';
+import { seedContentSnapshot } from './seed-content-snapshot';
 import { upsertHeroContent } from './hero-content-service';
 import { upsertAboutContent } from './about-content-service';
 import { upsertGalleryContent } from './gallery-content-service';
@@ -188,9 +189,54 @@ export function deriveStructuredContentSeedFromDefaults(): StructuredContentSeed
   };
 }
 
+function getSeedSourceContent() {
+  return {
+    heroContent: seedContentSnapshot?.heroContent ?? defaultHeroContent,
+    aboutContent: seedContentSnapshot?.aboutContent ?? defaultAboutContent,
+    galleryContent: seedContentSnapshot?.galleryContent ?? defaultGalleryContent,
+    journalContent: seedContentSnapshot?.journalContent ?? defaultJournalContent,
+    contactContent: seedContentSnapshot?.contactContent ?? defaultContactContent,
+    craftsmanshipContent: seedContentSnapshot?.craftsmanshipContent ?? defaultCraftsmanshipContent,
+  };
+}
+
+export function deriveStructuredContentSeedFromConfiguredSource(): StructuredContentSeed {
+  const source = getSeedSourceContent();
+  const categories = source.galleryContent.categories.map((category, rank) =>
+    deriveGalleryCategoryRecord(category, rank)
+  );
+
+  const subcategories = source.galleryContent.categories.flatMap((category) => {
+    const categoryRecord = deriveGalleryCategoryRecord(
+      category,
+      source.galleryContent.categories.findIndex((entry) => entry.name === category.name)
+    );
+
+    return category.subcategories.map((subcategory, rank) =>
+      deriveGallerySubcategoryRecord(category, categoryRecord, subcategory, rank)
+    );
+  });
+
+  const galleryItems = source.galleryContent.pieces.map((piece, rank) =>
+    deriveGalleryItemRecord(piece, rank)
+  );
+
+  const journalPosts = source.journalContent.posts.map((post, rank) =>
+    deriveJournalPostRecord(post, rank)
+  );
+
+  return {
+    categories,
+    subcategories,
+    galleryItems,
+    journalPosts,
+  };
+}
+
 export async function seedStructuredContent(options?: { reset?: boolean; syncLegacyContent?: boolean }) {
   const { reset = false, syncLegacyContent = true } = options ?? {};
-  const seed = deriveStructuredContentSeedFromDefaults();
+  const seed = deriveStructuredContentSeedFromConfiguredSource();
+  const source = getSeedSourceContent();
 
   if (reset) {
     await Promise.all([
@@ -203,12 +249,12 @@ export async function seedStructuredContent(options?: { reset?: boolean; syncLeg
 
   if (syncLegacyContent) {
     await Promise.all([
-      upsertHeroContent(defaultHeroContent),
-      upsertAboutContent(defaultAboutContent),
-      upsertGalleryContent(defaultGalleryContent),
-      upsertJournalContent(defaultJournalContent),
-      upsertContactContent(defaultContactContent),
-      upsertCraftsmanshipContent(defaultCraftsmanshipContent),
+      upsertHeroContent(source.heroContent),
+      upsertAboutContent(source.aboutContent),
+      upsertGalleryContent(source.galleryContent),
+      upsertJournalContent(source.journalContent),
+      upsertContactContent(source.contactContent),
+      upsertCraftsmanshipContent(source.craftsmanshipContent),
     ]);
   }
 
