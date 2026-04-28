@@ -10,20 +10,21 @@ import { JournalPage } from './components/JournalPage';
 import { JournalArticlePage } from './components/JournalArticlePage';
 import { Contact } from './components/Contact';
 import { Footer } from './components/Footer';
-import type { GalleryContent } from './lib/gallery';
 import type { HeroContent } from './lib/heroContent';
 import type { AboutContent } from './lib/aboutContent';
 import type { ContactContent } from './lib/contactContent';
 import type { CraftsmanshipContent } from './lib/craftsmanshipContent';
 import type { JournalContent } from './lib/journal';
+import type { GalleryPreviewContent, GalleryShellContent } from './lib/gallery-public';
 
 type AppProps = {
-  heroContent: HeroContent;
-  aboutContent: AboutContent;
-  galleryContent: GalleryContent;
-  journalContent: JournalContent;
+  heroContent?: HeroContent | null;
+  aboutContent?: AboutContent | null;
+  galleryPreviewContent?: GalleryPreviewContent | null;
+  galleryShellContent?: GalleryShellContent | null;
+  journalContent?: JournalContent | null;
   contactContent: ContactContent;
-  craftsmanshipContent: CraftsmanshipContent;
+  craftsmanshipContent?: CraftsmanshipContent | null;
   routePath?: string;
 };
 
@@ -91,7 +92,8 @@ function matchRoute(pathname: string): RouteMatch {
 export default function App({
   heroContent,
   aboutContent,
-  galleryContent,
+  galleryPreviewContent,
+  galleryShellContent,
   journalContent,
   contactContent,
   craftsmanshipContent,
@@ -189,23 +191,23 @@ export default function App({
     <div className="relative min-h-screen overflow-x-hidden">
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(circle_at_top,rgba(168,153,110,0.18),transparent_65%)]" />
-        <div className="absolute left-[-8rem] top-[32rem] h-72 w-72 rounded-full bg-secondary/40 blur-3xl" />
-        <div className="absolute right-[-10rem] top-[58rem] h-96 w-96 rounded-full bg-accent/10 blur-3xl" />
+      <div className="absolute left-[-8rem] top-[32rem] h-72 w-72 rounded-full bg-secondary/40 blur-3xl" />
+      <div className="absolute right-[-10rem] top-[58rem] h-96 w-96 rounded-full bg-accent/10 blur-3xl" />
       </div>
       <Navigation currentPath={clientLocation.path} onNavigate={handleNavigate} />
       {routeMatch.kind === 'gallery' ? (
-        <GalleryPage content={galleryContent} />
-      ) : routeMatch.kind === 'journal-index' ? (
+        <GalleryPage shell={galleryShellContent ?? null} />
+      ) : routeMatch.kind === 'journal-index' && journalContent ? (
         <JournalPage content={journalContent} />
-      ) : routeMatch.kind === 'journal-article' ? (
+      ) : routeMatch.kind === 'journal-article' && journalContent ? (
         <JournalArticlePage content={journalContent} slug={routeMatch.slug} />
       ) : (
         <>
-          <Hero content={heroContent} />
-          <About content={aboutContent} />
-          <GalleryPreview content={galleryContent} />
-          <Craftsmanship content={craftsmanshipContent} />
-          <JournalPreview content={journalContent} />
+          {heroContent ? <Hero content={heroContent} /> : null}
+          {aboutContent ? <About content={aboutContent} /> : null}
+          <GalleryPreview content={galleryPreviewContent ?? null} />
+          {craftsmanshipContent ? <Craftsmanship content={craftsmanshipContent} /> : null}
+          {journalContent ? <JournalPreview content={journalContent} /> : null}
         </>
       )}
       <Contact content={contactContent} />

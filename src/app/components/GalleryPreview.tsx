@@ -1,17 +1,21 @@
 import { ArrowUpRight } from 'lucide-react';
 import { useState } from 'react';
-import { getHomepageGalleryPieces, type GalleryContent } from '../lib/gallery';
+import type { GalleryPreviewContent } from '../lib/gallery-public';
 import { GalleryImage } from './GalleryImage';
 import { GalleryPieceViewer } from './GalleryPieceViewer';
 
 type GalleryPreviewProps = {
-  content: GalleryContent;
+  content: GalleryPreviewContent | null;
 };
 
 export function GalleryPreview({ content }: GalleryPreviewProps) {
-  const featuredGalleryPieces = getHomepageGalleryPieces(content);
   const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
-  const selectedPiece = featuredGalleryPieces.find((piece) => piece.id === selectedPieceId) ?? null;
+
+  if (!content) {
+    return null;
+  }
+
+  const selectedPiece = content.pieces.find((piece) => piece.id === selectedPieceId) ?? null;
 
   return (
     <section id="gallery-preview" className="scroll-mt-28 bg-background py-20 sm:py-24 lg:py-32">
@@ -39,7 +43,7 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
 
         <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="grid gap-6 sm:grid-cols-2">
-            {featuredGalleryPieces.slice(0, 4).map((piece, index) => (
+            {content.pieces.slice(0, 4).map((piece, index) => (
               <button
                 type="button"
                 key={piece.id}
@@ -54,6 +58,7 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
                     asset={piece.image}
                     className="h-full w-full"
                     priority={index < 2}
+                    variant={{ width: index === 0 ? 1200 : 900, quality: 72, format: 'webp' }}
                     sizes={index === 0 ? '(min-width: 1024px) 42rem, 100vw' : '(min-width: 1024px) 20rem, 100vw'}
                   />
                 </div>
@@ -78,7 +83,7 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
           </div>
 
           <div className="flex flex-col gap-6">
-            {featuredGalleryPieces.slice(4, 6).map((piece, index) => (
+            {content.pieces.slice(4, 6).map((piece, index) => (
               <button
                 type="button"
                 key={piece.id}
@@ -90,6 +95,7 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
                   <GalleryImage
                     asset={piece.image}
                     className="h-full w-full"
+                    variant={{ width: 900, quality: 72, format: 'webp' }}
                     sizes="(min-width: 1024px) 24rem, 100vw"
                   />
                 </div>

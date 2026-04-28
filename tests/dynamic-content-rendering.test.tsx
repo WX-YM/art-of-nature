@@ -9,6 +9,7 @@ import type { HeroContent } from '../src/app/lib/heroContent';
 import type { AboutContent } from '../src/app/lib/aboutContent';
 import type { ContactContent } from '../src/app/lib/contactContent';
 import type { CraftsmanshipContent } from '../src/app/lib/craftsmanshipContent';
+import { buildGalleryPreviewContent, buildGalleryShellContent } from '../server/gallery-public-service';
 
 function createHeroContent(): HeroContent {
   return {
@@ -113,7 +114,8 @@ test('App renders dynamic hero/about/contact text from props', () => {
     <App
       heroContent={heroContent}
       aboutContent={aboutContent}
-      galleryContent={galleryContent}
+      galleryPreviewContent={buildGalleryPreviewContent(galleryContent)}
+      galleryShellContent={buildGalleryShellContent(galleryContent)}
       journalContent={journalContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
@@ -149,7 +151,8 @@ test('Contact section keeps dynamic form field text and direct contacts', () => 
     <App
       heroContent={heroContent}
       aboutContent={aboutContent}
-      galleryContent={galleryContent}
+      galleryPreviewContent={buildGalleryPreviewContent(galleryContent)}
+      galleryShellContent={buildGalleryShellContent(galleryContent)}
       journalContent={journalContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
@@ -174,7 +177,8 @@ test('SSR entry render includes dynamic content values', () => {
   const html = renderEntryServer(
     heroContent,
     aboutContent,
-    galleryContent,
+    buildGalleryPreviewContent(galleryContent),
+    buildGalleryShellContent(galleryContent),
     journalContent,
     contactContent,
     craftsmanshipContent
@@ -219,7 +223,8 @@ test('App trims dynamic content and skips empty dynamic contact entries', () => 
     <App
       heroContent={heroContent}
       aboutContent={aboutContent}
-      galleryContent={galleryContent}
+      galleryPreviewContent={buildGalleryPreviewContent(galleryContent)}
+      galleryShellContent={buildGalleryShellContent(galleryContent)}
       journalContent={journalContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
@@ -235,11 +240,13 @@ test('App trims dynamic content and skips empty dynamic contact entries', () => 
 });
 
 test('gallery route renders the editorial gallery structure', () => {
+  const galleryContent = createGalleryContent();
   const html = renderToStaticMarkup(
     <App
       heroContent={createHeroContent()}
       aboutContent={createAboutContent()}
-      galleryContent={createGalleryContent()}
+      galleryPreviewContent={buildGalleryPreviewContent(galleryContent)}
+      galleryShellContent={buildGalleryShellContent(galleryContent)}
       journalContent={createJournalContent()}
       contactContent={createContactContent()}
       craftsmanshipContent={createCraftsmanshipContent()}
@@ -248,11 +255,8 @@ test('gallery route renders the editorial gallery structure', () => {
   );
 
   assert.ok(html.includes('Dynamic Gallery Heading'));
-  assert.ok(html.includes('Living Room'));
-  assert.ok(html.includes('Dining Room'));
-  assert.ok(html.includes('Lead piece'));
-  assert.ok(html.includes('Tables'));
-  assert.ok(!html.includes('Room index'));
+  assert.ok(html.includes('Loading gallery'));
+  assert.ok(!html.includes('Lead piece'));
 });
 
 test('journal route renders dynamic journal index content', () => {
@@ -261,7 +265,8 @@ test('journal route renders dynamic journal index content', () => {
     <App
       heroContent={createHeroContent()}
       aboutContent={createAboutContent()}
-      galleryContent={createGalleryContent()}
+      galleryPreviewContent={buildGalleryPreviewContent(createGalleryContent())}
+      galleryShellContent={buildGalleryShellContent(createGalleryContent())}
       journalContent={journalContent}
       contactContent={createContactContent()}
       craftsmanshipContent={createCraftsmanshipContent()}
@@ -281,7 +286,8 @@ test('journal article route renders article page content', () => {
     <App
       heroContent={createHeroContent()}
       aboutContent={createAboutContent()}
-      galleryContent={createGalleryContent()}
+      galleryPreviewContent={buildGalleryPreviewContent(createGalleryContent())}
+      galleryShellContent={buildGalleryShellContent(createGalleryContent())}
       journalContent={journalContent}
       contactContent={createContactContent()}
       craftsmanshipContent={createCraftsmanshipContent()}

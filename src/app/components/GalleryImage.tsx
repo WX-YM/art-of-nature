@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import type { GalleryImageAsset } from '../lib/gallery';
+import { buildGalleryImageVariantUrl, type GalleryImageVariantOptions } from '../lib/gallery-public';
 
 type GalleryImageProps = {
   asset: GalleryImageAsset;
@@ -8,6 +9,7 @@ type GalleryImageProps = {
   imageClassName?: string;
   sizes?: string;
   priority?: boolean;
+  variant?: GalleryImageVariantOptions;
 };
 
 export function GalleryImage({
@@ -16,13 +18,15 @@ export function GalleryImage({
   imageClassName,
   sizes,
   priority = false,
+  variant,
 }: GalleryImageProps) {
   const [isLoaded, setIsLoaded] = useState(false);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const resolvedSrc = buildGalleryImageVariantUrl(asset.src, variant);
 
   useEffect(() => {
     setIsLoaded(false);
-  }, [asset.src]);
+  }, [resolvedSrc]);
 
   useEffect(() => {
     const image = imageRef.current;
@@ -30,7 +34,7 @@ export function GalleryImage({
     if (image?.complete && image.naturalWidth > 0) {
       setIsLoaded(true);
     }
-  }, [asset.src]);
+  }, [resolvedSrc]);
 
   return (
     <div className={`relative overflow-hidden bg-secondary/70 ${className ?? ''}`}>
@@ -43,7 +47,7 @@ export function GalleryImage({
       </div>
       <ImageWithFallback
         ref={imageRef}
-        src={asset.src}
+        src={resolvedSrc}
         alt={asset.alt}
         width={asset.width}
         height={asset.height}

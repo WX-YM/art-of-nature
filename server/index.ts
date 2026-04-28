@@ -10,6 +10,7 @@ import { getGalleryContent, normalizeGalleryContent, upsertGalleryContent } from
 import { getJournalContent, normalizeJournalContent, upsertJournalContent } from './journal-content-service';
 import { render as renderApp } from '../src/entry-server';
 import { type GalleryContent, type GalleryPiece } from '../src/app/lib/gallery';
+import type { GalleryPreviewContent, GalleryShellContent } from '../src/app/lib/gallery-public';
 import { defaultHeroContent, type HeroContent } from '../src/app/lib/heroContent';
 import { getAboutContent, upsertAboutContent } from './about-content-service';
 import { defaultAboutContent, type AboutContent } from '../src/app/lib/aboutContent';
@@ -47,6 +48,16 @@ import {
   deleteUpload,
   deleteUploadFolder,
 } from './upload-service';
+import { MemoryCache } from './memory-cache';
+import { cacheDurations, setImmutableImageCache, setNoStore, setPublicJsonCache, setPublicSsrCache } from './cache-policy';
+import {
+  buildGalleryPreviewContent,
+  buildGalleryShellContent,
+  buildPublicGalleryPieceDetail,
+  buildPublicGallerySummary,
+} from './gallery-public-service';
+import { clearPublicImageVariantCache, parsePublicImageVariantRequest, resolvePublicImageVariant } from './public-image-service';
+import { galleryPieceDetailRateLimit, gallerySummaryRateLimit, publicImageVariantRateLimit } from './public-rate-limiters';
 
 const downloadsDir = path.resolve(uploadsDir, 'downloads');
 import {
@@ -68,15 +79,19 @@ app.use(express.urlencoded({ extended: true, limit: '32mb' }));
 app.use('/uploads', express.static(uploadsDir));
 app.use('/downloads', express.static(downloadsDir));
 app.use('/api', (req, res, next) => {
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  setNoStore(res);
   next();
 });
 app.use('/admin', (req, res, next) => {
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  setNoStore(res);
   next();
 });
 
-const cachedHtmlByPath = new Map<string, string>();
+const ssrHtmlCache = new MemoryCache<string>(cacheDurations.pageShell * 1000);
+const gallerySummaryCache = new MemoryCache<ReturnType<typeof buildPublicGallerySummary>>(cacheDurations.gallerySummary * 1000);
+const galleryPieceDetailCache = new MemoryCache<NonNullable<ReturnType<typeof buildPublicGalleryPieceDetail>>>(
+  cacheDurations.galleryPieceDetail * 1000
+);
 const activeSessions = new Map<string, { userId: string; expiresAt: number }>();
 const contactRequestsByIp = new Map<string, { count: number; windowStart: number }>();
 const pendingGoogleOAuthStates = new Map<string, {
@@ -89,7 +104,14 @@ const pendingGoogleOAuthStates = new Map<string, {
 }>();
 
 function invalidatePageCache() {
-  cachedHtmlByPath.clear();
+  ssrHtmlCache.clear();
+}
+
+async function invalidatePublicGalleryCaches() {
+  ssrHtmlCache.clear();
+  gallerySummaryCache.clear();
+  galleryPieceDetailCache.clear();
+  await clearPublicImageVariantCache();
 }
 
 function createSessionTokenForUser(userId: string) {
@@ -159,6 +181,31 @@ function getGoogleOAuthRedirectUri(req: express.Request) {
 
 function slugifyEditorValue(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+type PublicRouteMatch =
+  | { kind: 'home' }
+  | { kind: 'gallery' }
+  | { kind: 'journal-index' }
+  | { kind: 'journal-article'; slug: string };
+
+function matchPublicRoute(pathname: string): PublicRouteMatch {
+  if (pathname === '/gallery') {
+    return { kind: 'gallery' };
+  }
+
+  if (pathname === '/journal') {
+    return { kind: 'journal-index' };
+  }
+
+  if (pathname.startsWith('/journal/')) {
+    return {
+      kind: 'journal-article',
+      slug: pathname.slice('/journal/'.length).trim(),
+    };
+  }
+
+  return { kind: 'home' };
 }
 
 function parseIntegerField(body: unknown, fieldName: string, fallback: number = 0) {
@@ -253,8 +300,8 @@ function getSeoMetadata(
   pathname: string,
   origin: string,
   heroContent: HeroContent,
-  galleryContent: GalleryContent,
-  journalContent: JournalContent
+  galleryContent: GalleryContent | null,
+  journalContent: JournalContent | null
 ): SeoMetadata {
   const defaultImage = toAbsoluteUrl(origin, heroContent.backgroundImageUrl);
   const websiteJsonLd = {
@@ -283,7 +330,7 @@ function getSeoMetadata(
     return {
       title: 'Gallery | Art of Nature',
       description: normalizeSeoText(
-        galleryContent.pageDescription,
+        galleryContent?.pageDescription,
         'Browse bespoke handcrafted furniture and interior craftsmanship from Art of Nature.'
       ),
       canonicalPath: '/gallery',
@@ -298,7 +345,7 @@ function getSeoMetadata(
     return {
       title: 'Journal | Art of Nature',
       description: normalizeSeoText(
-        journalContent.pageDescription,
+        journalContent?.pageDescription,
         'Read material notes and studio insights from Art of Nature craftsmanship.'
       ),
       canonicalPath: '/journal',
@@ -311,7 +358,7 @@ function getSeoMetadata(
 
   if (pathname.startsWith('/journal/')) {
     const slug = pathname.slice('/journal/'.length);
-    const post = getJournalPostBySlug(journalContent, slug);
+    const post = journalContent ? getJournalPostBySlug(journalContent, slug) : null;
 
     if (post) {
       return {
@@ -4461,7 +4508,7 @@ app.post('/admin/content/gallery', async (req, res, next) => {
     });
 
     await upsertGalleryContent(content);
-    invalidatePageCache();
+    await invalidatePublicGalleryCaches();
     res.redirect(303, '/admin?tab=gallery&status=saved');
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Invalid')) {
@@ -4607,7 +4654,7 @@ app.post('/admin/content/reset', async (req, res, next) => {
 
     await seedStructuredContent({ reset: true, syncLegacyContent: true });
 
-    invalidatePageCache();
+    await invalidatePublicGalleryCaches();
     res.redirect(303, '/admin?status=reset');
   } catch (error) {
     next(error);
@@ -4742,6 +4789,53 @@ app.get('/api/gallery', async (_req, res, next) => {
   }
 });
 
+app.get('/api/gallery/summary', gallerySummaryRateLimit, async (_req, res, next) => {
+  try {
+    const cachedSummary = gallerySummaryCache.get('summary');
+
+    if (cachedSummary) {
+      setPublicJsonCache(res, cacheDurations.gallerySummary, cacheDurations.gallerySummaryStale);
+      res.json(cachedSummary);
+      return;
+    }
+
+    const gallery = await getGalleryContent();
+    const summary = buildPublicGallerySummary(gallery);
+    gallerySummaryCache.set('summary', summary);
+    setPublicJsonCache(res, cacheDurations.gallerySummary, cacheDurations.gallerySummaryStale);
+    res.json(summary);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/gallery/pieces/:pieceId', galleryPieceDetailRateLimit, async (req, res, next) => {
+  try {
+    const pieceId = req.params.pieceId.trim();
+    const cachedDetail = galleryPieceDetailCache.get(pieceId);
+
+    if (cachedDetail) {
+      setPublicJsonCache(res, cacheDurations.galleryPieceDetail, cacheDurations.galleryPieceDetailStale);
+      res.json(cachedDetail);
+      return;
+    }
+
+    const gallery = await getGalleryContent();
+    const detail = buildPublicGalleryPieceDetail(gallery, pieceId);
+
+    if (!detail) {
+      res.status(404).json({ message: 'Gallery piece not found.' });
+      return;
+    }
+
+    galleryPieceDetailCache.set(pieceId, detail);
+    setPublicJsonCache(res, cacheDurations.galleryPieceDetail, cacheDurations.galleryPieceDetailStale);
+    res.json(detail);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/gallery/categories', async (_req, res, next) => {
   try {
     const categories = await getRankedGalleryCategories();
@@ -4834,6 +4928,40 @@ app.get('/api/uploads/image', async (req, res, next) => {
   }
 });
 
+app.get('/media/uploads', publicImageVariantRateLimit, async (req, res, next) => {
+  try {
+    const variantRequest = parsePublicImageVariantRequest(req.query as Record<string, unknown>);
+    const variantFile = await resolvePublicImageVariant(variantRequest);
+
+    setImmutableImageCache(res);
+    res.set({
+      'Content-Type': variantFile.mimeType,
+      'Content-Length': String(variantFile.size),
+    });
+    res.sendFile(variantFile.absolutePath);
+  } catch (error) {
+    if (error instanceof Error && (error.message === 'File not found.' || error.message === 'Folder not found.')) {
+      res.status(404).json({ message: error.message });
+      return;
+    }
+
+    if (error instanceof Error && isUploadClientErrorMessage(error.message)) {
+      res.status(400).json({ message: error.message });
+      return;
+    }
+
+    if (
+      error instanceof Error &&
+      (error.message === 'Invalid width.' || error.message === 'Invalid quality.' || error.message === 'Invalid format.')
+    ) {
+      res.status(400).json({ message: error.message });
+      return;
+    }
+
+    next(error);
+  }
+});
+
 app.post('/api/uploads/files', async (req, res, next) => {
   try {
     const user = await getAuthenticatedUser(req);
@@ -4843,6 +4971,7 @@ app.post('/api/uploads/files', async (req, res, next) => {
     }
 
     const uploaded = await saveUploadedImage(req.body);
+    await invalidatePublicGalleryCaches();
     res.status(201).json(uploaded);
   } catch (error) {
     if (error instanceof Error && isUploadClientErrorMessage(error.message)) {
@@ -4869,6 +4998,7 @@ app.delete('/api/uploads/files', async (req, res, next) => {
     }
 
     await deleteUpload(requestedPath, uploadsDir);
+    await invalidatePublicGalleryCaches();
     res.status(204).end();
   } catch (error) {
     if (error instanceof Error && error.message === 'File not found.') {
@@ -4895,6 +5025,7 @@ app.post('/api/uploads/folders', async (req, res, next) => {
 
     const payload = req.body as { folder?: unknown };
     const created = await createUploadFolder(payload.folder);
+    await invalidatePublicGalleryCaches();
     res.status(201).json(created);
   } catch (error) {
     if (error instanceof Error && isUploadClientErrorMessage(error.message)) {
@@ -4921,6 +5052,7 @@ app.delete('/api/uploads/folders', async (req, res, next) => {
     }
 
     await deleteUploadFolder(requestedPath, uploadsDir);
+    await invalidatePublicGalleryCaches();
     res.status(204).end();
   } catch (error) {
     if (error instanceof Error && error.message === 'Folder not found.') {
@@ -5109,7 +5241,7 @@ app.put('/api/gallery', async (req, res, next) => {
     }
 
     const saved = await upsertGalleryContent(req.body);
-    invalidatePageCache();
+    await invalidatePublicGalleryCaches();
     res.json(saved);
   } catch (error) {
     next(error);
@@ -5128,7 +5260,7 @@ app.put('/api/gallery/categories', async (req, res, next) => {
     const saved = Array.isArray(payload?.subcategories)
       ? await upsertGalleryCategoryStructure(req.body)
       : await upsertGalleryCategoryRecord(req.body);
-    invalidatePageCache();
+    await invalidatePublicGalleryCaches();
     res.json(saved);
   } catch (error) {
     if (error instanceof Error && error.message === 'Invalid category payload.') {
@@ -5149,7 +5281,7 @@ app.delete('/api/gallery/categories/:categoryId', async (req, res, next) => {
     }
 
     const deleted = await deleteGalleryCategoryRecord(req.params.categoryId);
-    invalidatePageCache();
+    await invalidatePublicGalleryCaches();
     res.json({ deleted });
   } catch (error) {
     if (error instanceof Error && error.message === 'Category not found.') {
@@ -5233,7 +5365,7 @@ app.put('/api/craftsmanship', async (req, res, next) => {
   }
 });
 
-app.post('/api/cache/invalidate', (req, res) => {
+app.post('/api/cache/invalidate', async (req, res) => {
   const token = req.header('x-cache-token') ?? req.body?.token;
 
   if (!isAuthorizedForInvalidation(token)) {
@@ -5241,6 +5373,7 @@ app.post('/api/cache/invalidate', (req, res) => {
     return;
   }
 
+  await invalidatePublicGalleryCaches();
   invalidatePageCache();
   res.json({ ok: true, message: 'SSR cache invalidated.' });
 });
@@ -5310,10 +5443,11 @@ app.get('/sitemap.xml', async (req, res, next) => {
 app.get('*', async (req, res, next) => {
   try {
     const cacheKey = req.path;
-    const cachedHtml = cachedHtmlByPath.get(cacheKey);
+    const cachedHtml = ssrHtmlCache.get(cacheKey);
 
     if (cachedHtml) {
-      res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, no-cache, must-revalidate, private' }).end(cachedHtml);
+      setPublicSsrCache(res);
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(cachedHtml);
       return;
     }
 
@@ -5328,16 +5462,42 @@ app.get('*', async (req, res, next) => {
       render = viteServerModule.render;
     }
 
+    const routeMatch = matchPublicRoute(req.path);
     const heroContent = await getHeroContent();
-    const aboutContent = await getAboutContent();
-    const galleryContent = await getGalleryContent();
-    const journalContent = await getJournalContent();
     const contactContent = await getContactContent();
-    const craftsmanshipContent = await getCraftsmanshipContent();
+    let aboutContent: AboutContent | null = null;
+    let galleryContent: GalleryContent | null = null;
+    let galleryPreviewContent: GalleryPreviewContent | null = null;
+    let galleryShellContent: GalleryShellContent | null = null;
+    let journalContent: JournalContent | null = null;
+    let craftsmanshipContent: CraftsmanshipContent | null = null;
+
+    if (routeMatch.kind === 'home') {
+      const [loadedAboutContent, loadedGalleryContent, loadedJournalContent, loadedCraftsmanshipContent] = await Promise.all([
+        getAboutContent(),
+        getGalleryContent(),
+        getJournalContent(),
+        getCraftsmanshipContent(),
+      ]);
+
+      aboutContent = loadedAboutContent;
+      galleryContent = loadedGalleryContent;
+      galleryPreviewContent = buildGalleryPreviewContent(loadedGalleryContent);
+      galleryShellContent = buildGalleryShellContent(loadedGalleryContent);
+      journalContent = loadedJournalContent;
+      craftsmanshipContent = loadedCraftsmanshipContent;
+    } else if (routeMatch.kind === 'gallery') {
+      galleryContent = await getGalleryContent();
+      galleryShellContent = buildGalleryShellContent(galleryContent);
+    } else {
+      journalContent = await getJournalContent();
+    }
+
     const appHtml = render(
       heroContent,
       aboutContent,
-      galleryContent,
+      galleryPreviewContent,
+      galleryShellContent,
       journalContent,
       contactContent,
       craftsmanshipContent,
@@ -5348,15 +5508,19 @@ app.get('*', async (req, res, next) => {
     const seoTags = renderSeoTags(siteOrigin, seoMetadata);
     template = injectSeoTags(template, seoTags);
 
-    if (req.path.startsWith('/journal/') && !getJournalPostBySlug(journalContent, req.path.slice('/journal/'.length))) {
+    if (
+      req.path.startsWith('/journal/') &&
+      (!journalContent || !getJournalPostBySlug(journalContent, req.path.slice('/journal/'.length)))
+    ) {
       res.status(404);
     }
 
-    const initialDataScript = `<script>window.__INITIAL_HERO__=${serializeForScript(heroContent)};window.__INITIAL_ABOUT__=${serializeForScript(aboutContent)};window.__INITIAL_GALLERY__=${serializeForScript(galleryContent)};window.__INITIAL_JOURNAL__=${serializeForScript(journalContent)};window.__INITIAL_CONTACT__=${serializeForScript(contactContent)};window.__INITIAL_CRAFTSMANSHIP__=${serializeForScript(craftsmanshipContent)}</script>`;
+    const initialDataScript = `<script>window.__INITIAL_HERO__=${serializeForScript(heroContent)};window.__INITIAL_ABOUT__=${serializeForScript(aboutContent)};window.__INITIAL_GALLERY_PREVIEW__=${serializeForScript(galleryPreviewContent)};window.__INITIAL_GALLERY_SHELL__=${serializeForScript(galleryShellContent)};window.__INITIAL_JOURNAL__=${serializeForScript(journalContent)};window.__INITIAL_CONTACT__=${serializeForScript(contactContent)};window.__INITIAL_CRAFTSMANSHIP__=${serializeForScript(craftsmanshipContent)}</script>`;
     const html = template.replace('<div id="root"></div>', `<div id="root">${appHtml}</div>${initialDataScript}`);
 
-    cachedHtmlByPath.set(cacheKey, html);
+    ssrHtmlCache.set(cacheKey, html);
 
+    setPublicSsrCache(res);
     res.set({ 'Content-Type': 'text/html' }).end(html);
   } catch (error) {
     if (vite) {
