@@ -26,7 +26,13 @@ const mimeTypesByFormat: Record<PublicImageVariantFormat, string> = {
 
 function normalizeRelativePath(rawPath: string) {
   const withoutPrefix = rawPath.startsWith('/uploads/') ? rawPath.slice('/uploads/'.length) : rawPath;
-  return withoutPrefix.replace(/^\/+/, '');
+  const trimmedPath = withoutPrefix.replace(/^\/+/, '');
+
+  try {
+    return decodeURIComponent(trimmedPath);
+  } catch {
+    return trimmedPath;
+  }
 }
 
 export function parsePublicImageVariantRequest(query: Record<string, unknown>): PublicImageVariantRequest {

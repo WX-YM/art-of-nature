@@ -115,6 +115,19 @@ test('public image variant endpoint rejects invalid parameters and serves optimi
   assert.match(imageResponse.headers.get('cache-control') ?? '', /immutable/);
 });
 
+test('public image variant endpoint resolves already-encoded upload paths', async () => {
+  const uploadUrl = await findExistingUploadUrl();
+  assert.ok(uploadUrl, 'Expected at least one upload image to exist on disk');
+
+  const encodedUploadUrl = uploadUrl.replace(/ /g, '%20');
+  const imageResponse = await fetch(
+    `${baseUrl}/media/uploads?path=${encodeURIComponent(encodedUploadUrl)}&w=640&q=72&format=webp`
+  );
+
+  assert.equal(imageResponse.status, 200);
+  assert.equal(imageResponse.headers.get('content-type'), 'image/webp');
+});
+
 test('gallery summary endpoint is rate limited', async () => {
   let lastResponse: Response | null = null;
 
