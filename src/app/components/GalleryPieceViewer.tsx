@@ -105,10 +105,10 @@ export function GalleryPieceViewer({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="grid h-[min(94vh,60rem)] max-h-[94vh] w-[min(1440px,calc(100vw-1rem))] max-w-[min(1440px,calc(100vw-1rem))] gap-0 overflow-hidden border-border bg-[#f6f1ea] p-0 shadow-[0_42px_120px_rgba(28,24,21,0.24)] sm:max-w-[min(1440px,calc(100vw-2rem))] md:grid-cols-[minmax(0,1.15fr)_22rem] xl:grid-cols-[minmax(0,1.4fr)_24rem] 2xl:grid-cols-[minmax(0,1.55fr)_26rem] [&>button]:right-4 [&>button]:top-4 [&>button]:rounded-full [&>button]:border [&>button]:border-border [&>button]:bg-white/90 [&>button]:p-2 [&>button]:backdrop-blur-sm">
+      <DialogContent className="grid h-[min(94dvh,60rem)] max-h-[94dvh] w-[min(1440px,calc(100vw-1rem))] max-w-[min(1440px,calc(100vw-1rem))] gap-0 overflow-y-auto overscroll-contain border-border bg-[#f6f1ea] p-0 shadow-[0_42px_120px_rgba(28,24,21,0.24)] [touch-action:pan-y] [-webkit-overflow-scrolling:touch] sm:max-w-[min(1440px,calc(100vw-2rem))] md:overflow-hidden md:[touch-action:auto] md:grid-cols-[minmax(0,1.15fr)_22rem] xl:grid-cols-[minmax(0,1.4fr)_24rem] 2xl:grid-cols-[minmax(0,1.55fr)_26rem] [&>button]:right-4 [&>button]:top-4 [&>button]:rounded-full [&>button]:border [&>button]:border-border [&>button]:bg-white/90 [&>button]:p-2 [&>button]:backdrop-blur-sm">
         {pieceData && activeImage ? (
           <>
-            <div className="relative flex min-h-0 flex-col bg-[#ece4d8]">
+            <div className="relative flex min-h-0 flex-col bg-[#ece4d8] md:max-h-[94dvh]">
               <div className="flex items-center justify-between border-b border-border/60 px-4 py-3 sm:px-5">
                 <p className="text-[0.72rem] uppercase tracking-[0.28em] text-foreground/48">
                   {pieceData.category} / {pieceData.subcategory}
@@ -119,7 +119,7 @@ export function GalleryPieceViewer({
               </div>
 
               <div className="relative min-h-0 flex-1 p-3 sm:p-4 xl:p-5">
-                <div className="relative h-full overflow-hidden rounded-[1.6rem] bg-[linear-gradient(180deg,#f6efe6,#e9decf)] shadow-[0_26px_70px_rgba(45,41,38,0.12)]">
+                <div className="relative h-[20rem] overflow-hidden rounded-[1.6rem] bg-[linear-gradient(180deg,#f6efe6,#e9decf)] shadow-[0_26px_70px_rgba(45,41,38,0.12)] sm:h-[24rem] md:h-full">
                   <GalleryImage
                     asset={activeImage}
                     className="h-full w-full"
@@ -164,7 +164,7 @@ export function GalleryPieceViewer({
               </div>
             </div>
 
-            <aside className="flex min-h-0 flex-col border-t border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.8),rgba(255,255,255,0.97))] md:border-l md:border-t-0">
+            <aside className="flex min-h-0 flex-col border-t border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.8),rgba(255,255,255,0.97))] md:max-h-[94dvh] md:border-l md:border-t-0">
               <div className="space-y-5 border-b border-border/70 px-5 py-5 sm:px-6">
                 <div>
                   <p className="text-[0.72rem] uppercase tracking-[0.26em] text-foreground/44">
@@ -200,7 +200,7 @@ export function GalleryPieceViewer({
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+              <div className="min-h-0 flex-1 overflow-visible px-5 py-5 sm:px-6 md:overflow-y-auto md:overscroll-contain md:[-webkit-overflow-scrolling:touch]">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <p className="text-[0.75rem] uppercase tracking-[0.28em] text-foreground/48">
                     Archive Images
