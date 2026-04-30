@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dial
 
 type GalleryPieceViewerProps = {
   piece: PublicGalleryPieceSummary | null;
+  assetVersion?: number | null;
   open: boolean;
   initialImageIndex?: number;
   onOpenChange: (open: boolean) => void;
@@ -18,6 +19,7 @@ type GalleryPieceViewerProps = {
 
 export function GalleryPieceViewer({
   piece,
+  assetVersion = null,
   open,
   initialImageIndex = 0,
   onOpenChange,
@@ -65,6 +67,7 @@ export function GalleryPieceViewer({
 
   const pieceData = detail ?? piece;
   const images = detail?.images ?? (piece ? [piece.image] : []);
+  const currentContentVersion = detail?.contentVersion ?? assetVersion ?? undefined;
 
   useEffect(() => {
     if (!open || images.length < 2) {
@@ -125,7 +128,7 @@ export function GalleryPieceViewer({
                     className="h-full w-full"
                     imageClassName="object-contain"
                     priority
-                    variant={{ width: 1600, quality: 80, format: 'webp' }}
+                    variant={{ width: 1600, quality: 80, format: 'webp', version: currentContentVersion }}
                     sizes="(min-width: 1536px) 68rem, (min-width: 1280px) 60rem, (min-width: 768px) 62vw, 100vw"
                   />
                   {detail && detail.images.length > 1 ? (
@@ -238,7 +241,7 @@ export function GalleryPieceViewer({
                               asset={image}
                               className="h-full w-full"
                               imageClassName="object-cover"
-                              variant={{ width: 420, quality: 70, format: 'webp' }}
+                              variant={{ width: 420, quality: 70, format: 'webp', version: currentContentVersion }}
                               sizes="(min-width: 1280px) 14rem, 40vw"
                             />
                           </div>

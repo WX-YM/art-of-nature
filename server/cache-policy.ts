@@ -22,7 +22,7 @@ export function setNoStore(res: express.Response) {
 export function setPublicSsrCache(res: express.Response) {
   res.set(
     'Cache-Control',
-    `public, max-age=${cacheDurations.pageShell}, stale-while-revalidate=${cacheDurations.pageShellStale}`
+    `public, max-age=0, must-revalidate, stale-while-revalidate=${cacheDurations.pageShellStale}`
   );
 }
 
@@ -31,7 +31,10 @@ export function setPublicJsonCache(
   maxAgeSeconds: number,
   staleWhileRevalidateSeconds: number
 ) {
-  res.set('Cache-Control', `public, max-age=${maxAgeSeconds}, stale-while-revalidate=${staleWhileRevalidateSeconds}`);
+  res.set(
+    'Cache-Control',
+    `public, max-age=${maxAgeSeconds}, must-revalidate, stale-while-revalidate=${staleWhileRevalidateSeconds}`
+  );
   res.set('Vary', 'Accept-Encoding');
 }
 

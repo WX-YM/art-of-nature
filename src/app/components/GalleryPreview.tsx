@@ -58,7 +58,7 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
                     asset={piece.image}
                     className="h-full w-full"
                     priority={index < 2}
-                    variant={{ width: index === 0 ? 1200 : 900, quality: 72, format: 'webp' }}
+                    variant={{ width: index === 0 ? 1200 : 900, quality: 72, format: 'webp', version: content.contentVersion }}
                     sizes={index === 0 ? '(min-width: 1024px) 42rem, 100vw' : '(min-width: 1024px) 20rem, 100vw'}
                   />
                 </div>
@@ -95,7 +95,7 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
                   <GalleryImage
                     asset={piece.image}
                     className="h-full w-full"
-                    variant={{ width: 900, quality: 72, format: 'webp' }}
+                    variant={{ width: 900, quality: 72, format: 'webp', version: content.contentVersion }}
                     sizes="(min-width: 1024px) 24rem, 100vw"
                   />
                 </div>
@@ -152,6 +152,7 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
 
       <GalleryPieceViewer
         piece={selectedPiece}
+        assetVersion={content.contentVersion}
         open={Boolean(selectedPiece)}
         onOpenChange={(open) => {
           if (!open) {

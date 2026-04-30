@@ -1,4 +1,6 @@
 import express from 'express';
+import { createServer as createHttpServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,6 +73,21 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const port = Number(process.env.PORT ?? 3000);
+const host = process.env.HOST?.trim() || '127.0.0.1';
+
+function readCliOption(flagName: string) {
+  const flagIndex = process.argv.indexOf(flagName);
+  if (flagIndex < 0) {
+    return '';
+  }
+
+  const nextValue = process.argv[flagIndex + 1];
+  return typeof nextValue === 'string' ? nextValue.trim() : '';
+}
+
+const tlsCertPath = readCliOption('--cert');
+const tlsPrivateKeyPath = readCliOption('--private');
+const tlsPublicChainPath = readCliOption('--pub');
 
 const app = express();
 app.set('trust proxy', true);
@@ -92,6 +109,7 @@ const gallerySummaryCache = new MemoryCache<ReturnType<typeof buildPublicGallery
 const galleryPieceDetailCache = new MemoryCache<NonNullable<ReturnType<typeof buildPublicGalleryPieceDetail>>>(
   cacheDurations.galleryPieceDetail * 1000
 );
+let galleryContentVersion = Date.now();
 const activeSessions = new Map<string, { userId: string; expiresAt: number }>();
 const contactRequestsByIp = new Map<string, { count: number; windowStart: number }>();
 const pendingGoogleOAuthStates = new Map<string, {
@@ -111,6 +129,7 @@ async function invalidatePublicGalleryCaches() {
   ssrHtmlCache.clear();
   gallerySummaryCache.clear();
   galleryPieceDetailCache.clear();
+  galleryContentVersion = Math.max(Date.now(), galleryContentVersion + 1);
   await clearPublicImageVariantCache();
 }
 
@@ -4800,7 +4819,7 @@ app.get('/api/gallery/summary', gallerySummaryRateLimit, async (_req, res, next)
     }
 
     const gallery = await getGalleryContent();
-    const summary = buildPublicGallerySummary(gallery);
+    const summary = buildPublicGallerySummary(gallery, galleryContentVersion);
     gallerySummaryCache.set('summary', summary);
     setPublicJsonCache(res, cacheDurations.gallerySummary, cacheDurations.gallerySummaryStale);
     res.json(summary);
@@ -4821,7 +4840,7 @@ app.get('/api/gallery/pieces/:pieceId', galleryPieceDetailRateLimit, async (req,
     }
 
     const gallery = await getGalleryContent();
-    const detail = buildPublicGalleryPieceDetail(gallery, pieceId);
+    const detail = buildPublicGalleryPieceDetail(gallery, pieceId, galleryContentVersion);
 
     if (!detail) {
       res.status(404).json({ message: 'Gallery piece not found.' });
@@ -5482,13 +5501,13 @@ app.get('*', async (req, res, next) => {
 
       aboutContent = loadedAboutContent;
       galleryContent = loadedGalleryContent;
-      galleryPreviewContent = buildGalleryPreviewContent(loadedGalleryContent);
-      galleryShellContent = buildGalleryShellContent(loadedGalleryContent);
+      galleryPreviewContent = buildGalleryPreviewContent(loadedGalleryContent, galleryContentVersion);
+      galleryShellContent = buildGalleryShellContent(loadedGalleryContent, galleryContentVersion);
       journalContent = loadedJournalContent;
       craftsmanshipContent = loadedCraftsmanshipContent;
     } else if (routeMatch.kind === 'gallery') {
       galleryContent = await getGalleryContent();
-      galleryShellContent = buildGalleryShellContent(galleryContent);
+      galleryShellContent = buildGalleryShellContent(galleryContent, galleryContentVersion);
     } else {
       journalContent = await getJournalContent();
     }
@@ -5548,9 +5567,36 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 if (!isTestEnvironment) {
   await connectToDatabase();
 
-  app.listen(port, () => {
-    console.log(`SSR server running on http://localhost:${port}`);
-  });
+  const useTls = Boolean(tlsCertPath && tlsPrivateKeyPath);
+
+  if ((tlsCertPath && !tlsPrivateKeyPath) || (!tlsCertPath && tlsPrivateKeyPath)) {
+    throw new Error('HTTPS startup requires both --cert and --private.');
+  }
+
+  if (useTls) {
+    const [cert, key, ca] = await Promise.all([
+      readFile(path.resolve(rootDir, tlsCertPath)),
+      readFile(path.resolve(rootDir, tlsPrivateKeyPath)),
+      tlsPublicChainPath ? readFile(path.resolve(rootDir, tlsPublicChainPath)) : Promise.resolve<Buffer | undefined>(undefined),
+    ]);
+
+    createHttpsServer(
+      {
+        cert,
+        key,
+        ca,
+      },
+      app
+    ).listen(port, host, () => {
+      const displayHost = host === '0.0.0.0' || host === '::' ? '0.0.0.0' : host;
+      console.log(`SSR production server running on https://${displayHost}:${port}`);
+    });
+  } else {
+    createHttpServer(app).listen(port, host, () => {
+      const displayHost = host === '0.0.0.0' || host === '::' ? '0.0.0.0' : host;
+      console.log(`SSR production server running on http://${displayHost}:${port}`);
+    });
+  }
 }
 
 export { app, vite };

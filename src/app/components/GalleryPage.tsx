@@ -40,10 +40,12 @@ function EmptyCollectionCard({
 
 function PieceCard({
   piece,
+  contentVersion,
   index,
   onOpen,
 }: {
   piece: PublicGalleryPieceSummary;
+  contentVersion: number;
   index: number;
   onOpen: (piece: PublicGalleryPieceSummary, imageIndex?: number) => void;
 }) {
@@ -72,7 +74,7 @@ function PieceCard({
             <GalleryImage
               asset={piece.image}
               className="h-full w-full transition-transform duration-700 group-hover:scale-[1.02]"
-              variant={{ width: 1200, quality: 72, format: 'webp' }}
+              variant={{ width: 1200, quality: 72, format: 'webp', version: contentVersion }}
               sizes="(min-width: 1024px) 24rem, (min-width: 640px) 50vw, 100vw"
             />
           </div>
@@ -147,6 +149,7 @@ export function GalleryPage({ shell }: GalleryPageProps) {
   }, []);
 
   const displayShell = summary ?? shell;
+  const currentContentVersion = summary?.contentVersion ?? shell?.contentVersion ?? 0;
 
   return (
     <main className="pb-20 pt-28 sm:pt-32 lg:pb-32">
@@ -222,7 +225,7 @@ export function GalleryPage({ shell }: GalleryPageProps) {
                             <GalleryImage
                               asset={category.leadPiece.image}
                               className="h-full w-full transition-transform duration-700 group-hover:scale-[1.02]"
-                              variant={{ width: 1100, quality: 72, format: 'webp' }}
+                              variant={{ width: 1100, quality: 72, format: 'webp', version: summary.contentVersion }}
                               sizes="(min-width: 1024px) 23rem, 100vw"
                             />
                           </div>
@@ -276,6 +279,7 @@ export function GalleryPage({ shell }: GalleryPageProps) {
                             <PieceCard
                               key={piece.id}
                               piece={piece}
+                              contentVersion={summary.contentVersion}
                               index={index}
                               onOpen={(nextPiece, imageIndex = 0) =>
                                 setViewerState({ piece: nextPiece, imageIndex })
@@ -306,6 +310,7 @@ export function GalleryPage({ shell }: GalleryPageProps) {
 
       <GalleryPieceViewer
         piece={viewerState.piece}
+        assetVersion={currentContentVersion}
         open={Boolean(viewerState.piece)}
         initialImageIndex={viewerState.imageIndex}
         onOpenChange={(open) => {

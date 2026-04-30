@@ -1,6 +1,7 @@
 import type { GalleryImageAsset } from './gallery';
 
 export type GalleryShellContent = {
+  contentVersion: number;
   previewEyebrow: string;
   previewHeading: string;
   previewDescription: string;
@@ -23,6 +24,7 @@ export type PublicGalleryPieceSummary = {
 };
 
 export type PublicGalleryPieceDetail = PublicGalleryPieceSummary & {
+  contentVersion: number;
   images: GalleryImageAsset[];
 };
 
@@ -47,7 +49,7 @@ export type PublicGallerySummary = GalleryShellContent & {
 
 export type GalleryPreviewContent = Pick<
   GalleryShellContent,
-  'previewEyebrow' | 'previewHeading' | 'previewDescription'
+  'contentVersion' | 'previewEyebrow' | 'previewHeading' | 'previewDescription'
 > & {
   pieces: PublicGalleryPieceSummary[];
 };
@@ -58,6 +60,7 @@ export type GalleryImageVariantOptions = {
   width: number;
   quality?: number;
   format?: GalleryImageVariantFormat;
+  version?: number | string;
 };
 
 export function getGalleryCategoryId(categoryName: string) {
@@ -96,6 +99,10 @@ export function buildGalleryImageVariantUrl(src: string, options?: GalleryImageV
 
   if (options.format) {
     params.set('format', options.format);
+  }
+
+  if (options.version !== undefined && options.version !== null && options.version !== '') {
+    params.set('v', String(options.version));
   }
 
   return `/media/uploads?${params.toString()}`;

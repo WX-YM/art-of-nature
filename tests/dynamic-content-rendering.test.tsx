@@ -114,8 +114,8 @@ test('App renders dynamic hero/about/contact text from props', () => {
     <App
       heroContent={heroContent}
       aboutContent={aboutContent}
-      galleryPreviewContent={buildGalleryPreviewContent(galleryContent)}
-      galleryShellContent={buildGalleryShellContent(galleryContent)}
+      galleryPreviewContent={buildGalleryPreviewContent(galleryContent, 1)}
+      galleryShellContent={buildGalleryShellContent(galleryContent, 1)}
       journalContent={journalContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
@@ -151,8 +151,8 @@ test('Contact section keeps dynamic form field text and direct contacts', () => 
     <App
       heroContent={heroContent}
       aboutContent={aboutContent}
-      galleryPreviewContent={buildGalleryPreviewContent(galleryContent)}
-      galleryShellContent={buildGalleryShellContent(galleryContent)}
+      galleryPreviewContent={buildGalleryPreviewContent(galleryContent, 1)}
+      galleryShellContent={buildGalleryShellContent(galleryContent, 1)}
       journalContent={journalContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
@@ -177,8 +177,8 @@ test('SSR entry render includes dynamic content values', () => {
   const html = renderEntryServer(
     heroContent,
     aboutContent,
-    buildGalleryPreviewContent(galleryContent),
-    buildGalleryShellContent(galleryContent),
+    buildGalleryPreviewContent(galleryContent, 1),
+    buildGalleryShellContent(galleryContent, 1),
     journalContent,
     contactContent,
     craftsmanshipContent
@@ -223,8 +223,8 @@ test('App trims dynamic content and skips empty dynamic contact entries', () => 
     <App
       heroContent={heroContent}
       aboutContent={aboutContent}
-      galleryPreviewContent={buildGalleryPreviewContent(galleryContent)}
-      galleryShellContent={buildGalleryShellContent(galleryContent)}
+      galleryPreviewContent={buildGalleryPreviewContent(galleryContent, 1)}
+      galleryShellContent={buildGalleryShellContent(galleryContent, 1)}
       journalContent={journalContent}
       contactContent={contactContent}
       craftsmanshipContent={craftsmanshipContent}
@@ -245,8 +245,8 @@ test('gallery route renders the editorial gallery structure', () => {
     <App
       heroContent={createHeroContent()}
       aboutContent={createAboutContent()}
-      galleryPreviewContent={buildGalleryPreviewContent(galleryContent)}
-      galleryShellContent={buildGalleryShellContent(galleryContent)}
+      galleryPreviewContent={buildGalleryPreviewContent(galleryContent, 1)}
+      galleryShellContent={buildGalleryShellContent(galleryContent, 1)}
       journalContent={createJournalContent()}
       contactContent={createContactContent()}
       craftsmanshipContent={createCraftsmanshipContent()}
@@ -265,8 +265,8 @@ test('journal route renders dynamic journal index content', () => {
     <App
       heroContent={createHeroContent()}
       aboutContent={createAboutContent()}
-      galleryPreviewContent={buildGalleryPreviewContent(createGalleryContent())}
-      galleryShellContent={buildGalleryShellContent(createGalleryContent())}
+      galleryPreviewContent={buildGalleryPreviewContent(createGalleryContent(), 1)}
+      galleryShellContent={buildGalleryShellContent(createGalleryContent(), 1)}
       journalContent={journalContent}
       contactContent={createContactContent()}
       craftsmanshipContent={createCraftsmanshipContent()}
@@ -286,8 +286,8 @@ test('journal article route renders article page content', () => {
     <App
       heroContent={createHeroContent()}
       aboutContent={createAboutContent()}
-      galleryPreviewContent={buildGalleryPreviewContent(createGalleryContent())}
-      galleryShellContent={buildGalleryShellContent(createGalleryContent())}
+      galleryPreviewContent={buildGalleryPreviewContent(createGalleryContent(), 1)}
+      galleryShellContent={buildGalleryShellContent(createGalleryContent(), 1)}
       journalContent={journalContent}
       contactContent={createContactContent()}
       craftsmanshipContent={createCraftsmanshipContent()}

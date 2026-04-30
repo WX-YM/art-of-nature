@@ -28,8 +28,9 @@ function toPieceSummary(piece: GalleryPiece): PublicGalleryPieceSummary {
   };
 }
 
-export function buildGalleryShellContent(content: GalleryContent): GalleryShellContent {
+export function buildGalleryShellContent(content: GalleryContent, contentVersion: number): GalleryShellContent {
   return {
+    contentVersion,
     previewEyebrow: content.previewEyebrow,
     previewHeading: content.previewHeading,
     previewDescription: content.previewDescription,
@@ -39,8 +40,13 @@ export function buildGalleryShellContent(content: GalleryContent): GalleryShellC
   };
 }
 
-export function buildGalleryPreviewContent(content: GalleryContent, count: number = 6): GalleryPreviewContent {
+export function buildGalleryPreviewContent(
+  content: GalleryContent,
+  contentVersion: number,
+  count: number = 6
+): GalleryPreviewContent {
   return {
+    contentVersion,
     previewEyebrow: content.previewEyebrow,
     previewHeading: content.previewHeading,
     previewDescription: content.previewDescription,
@@ -48,7 +54,7 @@ export function buildGalleryPreviewContent(content: GalleryContent, count: numbe
   };
 }
 
-export function buildPublicGallerySummary(content: GalleryContent): PublicGallerySummary {
+export function buildPublicGallerySummary(content: GalleryContent, contentVersion: number): PublicGallerySummary {
   const categories: PublicGalleryCategory[] = buildGalleryCategories(content).map((category) => {
     const flatPieces = category.subcategories.flatMap((subcategory) => subcategory.pieces);
     const leadPiece = flatPieces.find((piece) => piece.featured) ?? flatPieces[0] ?? null;
@@ -69,14 +75,15 @@ export function buildPublicGallerySummary(content: GalleryContent): PublicGaller
   });
 
   return {
-    ...buildGalleryShellContent(content),
+    ...buildGalleryShellContent(content, contentVersion),
     categories,
   };
 }
 
 export function buildPublicGalleryPieceDetail(
   content: GalleryContent,
-  pieceId: string
+  pieceId: string,
+  contentVersion: number
 ): PublicGalleryPieceDetail | null {
   const piece = content.pieces.find((entry) => entry.id === pieceId);
 
@@ -85,6 +92,7 @@ export function buildPublicGalleryPieceDetail(
   }
 
   return {
+    contentVersion,
     ...toPieceSummary(piece),
     images: piece.images,
   };
