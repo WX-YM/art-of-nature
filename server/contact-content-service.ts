@@ -1,4 +1,5 @@
 import { defaultContactContent, type ContactContent } from '../src/app/lib/contactContent';
+import { resolveContactLinks } from '../src/app/lib/contactLinks';
 import { ContactContentModel } from './models/ContactContent';
 
 const CONTACT_KEY = 'primary-contact';
@@ -29,7 +30,9 @@ export async function getContactContent(): Promise<ContactContent> {
     messagePlaceholder: doc.messagePlaceholder ?? defaultContactContent.messagePlaceholder,
     submitText: doc.submitText ?? defaultContactContent.submitText,
     directContactLabel: doc.directContactLabel ?? defaultContactContent.directContactLabel,
-    directContacts: Array.isArray(doc.directContacts) ? doc.directContacts : defaultContactContent.directContacts,
+    directContacts: resolveContactLinks(
+      Array.isArray(doc.directContacts) ? doc.directContacts : defaultContactContent.directContacts
+    ).map(({ href, label }) => ({ href, label })),
   };
 }
 

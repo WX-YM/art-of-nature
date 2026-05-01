@@ -1,4 +1,5 @@
 import { ArrowRight } from 'lucide-react';
+import { replaceArchiveUiCopy } from '../lib/uiText';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import {
   formatJournalDate,
@@ -25,7 +26,7 @@ export function JournalPage({ content }: JournalPageProps) {
           </div>
           <div className="max-w-xl lg:justify-self-end">
             <p className="text-[1.02rem] leading-8 text-foreground/72 sm:text-[1.08rem]">
-              {content.pageDescription}
+              {replaceArchiveUiCopy(content.pageDescription)}
             </p>
           </div>
         </div>

@@ -7,6 +7,7 @@ import {
   type PublicGallerySubcategory,
   type PublicGallerySummary,
 } from '../lib/gallery-public';
+import { replaceArchiveUiCopy, stripGalleryRomanSuffix } from '../lib/uiText';
 import { GalleryImage } from './GalleryImage';
 import { GalleryPieceViewer } from './GalleryPieceViewer';
 
@@ -27,9 +28,9 @@ function EmptyCollectionCard({
         <p className="text-[0.72rem] uppercase tracking-[0.28em] text-foreground/42">
           {categoryName} / {subcategory.name}
         </p>
-        <h4 className="mt-3 text-[1.2rem] leading-tight text-foreground/78">Archive forthcoming</h4>
+        <h4 className="mt-3 text-[1.2rem] leading-tight text-foreground/78">Gallery forthcoming</h4>
         <p className="mt-3 max-w-md text-sm leading-7 text-foreground/58 sm:text-[0.98rem]">
-          The first documentation set for this section is still being curated and will join the archive once the
+          The first documentation set for this section is still being curated and will join the gallery once the
           final photography is assembled.
         </p>
       </div>
@@ -56,14 +57,9 @@ function PieceCard({
     >
       <button type="button" onClick={() => onOpen(piece, 0)} className="block w-full text-left">
         <div className="space-y-3 border-b border-border/70 p-5 sm:p-6">
-          <div className="flex items-start justify-between gap-4">
-            <h4 className="text-[1.45rem] leading-tight transition-colors group-hover:text-accent sm:text-[1.75rem]">
-              {piece.title}
-            </h4>
-            <span className="shrink-0 text-[0.68rem] uppercase tracking-[0.24em] text-foreground/42">
-              {piece.archiveCount} frame{piece.archiveCount === 1 ? '' : 's'}
-            </span>
-          </div>
+          <h4 className="text-[1.45rem] leading-tight transition-colors group-hover:text-accent sm:text-[1.75rem]">
+            {piece.title}
+          </h4>
           <p className="text-[0.74rem] uppercase tracking-[0.24em] text-foreground/44">
             {piece.category} / {piece.subcategory}
           </p>
@@ -80,7 +76,7 @@ function PieceCard({
           </div>
           <div className="mt-4 flex items-center justify-between gap-3 text-[0.72rem] uppercase tracking-[0.22em] text-foreground/40">
             <span>{piece.material}</span>
-            <span>Open archive</span>
+            <span>Open gallery</span>
           </div>
         </div>
       </button>
@@ -158,11 +154,11 @@ export function GalleryPage({ shell }: GalleryPageProps) {
           <div>
             <p className="section-kicker">{displayShell?.pageEyebrow ?? 'Gallery'}</p>
             <h1 style={{ fontSize: 'clamp(3rem, 7vw, 6rem)', lineHeight: '0.95' }}>
-              {displayShell?.pageHeading ?? 'Gallery'}
+              {displayShell?.pageHeading ? replaceArchiveUiCopy(displayShell.pageHeading) : 'Gallery'}
             </h1>
             {displayShell?.pageDescription ? (
               <p className="mt-5 max-w-3xl text-[1rem] leading-8 text-foreground/66 sm:text-[1.04rem]">
-                {displayShell.pageDescription}
+                {replaceArchiveUiCopy(displayShell.pageDescription)}
               </p>
             ) : null}
           </div>
@@ -196,18 +192,13 @@ export function GalleryPage({ shell }: GalleryPageProps) {
                     className="reveal-up border-t border-border/80 pt-5"
                     style={{ animationDelay: `${0.05 * (categoryIndex + 1)}s` }}
                   >
-                    <p className="section-kicker">{category.eyebrow}</p>
+                    <p className="section-kicker">{stripGalleryRomanSuffix(category.eyebrow)}</p>
                     <h2 style={{ fontSize: 'clamp(2.2rem, 4vw, 4rem)', lineHeight: '1.02' }}>
                       {category.name}
                     </h2>
                     <p className="mt-4 max-w-4xl text-[1rem] leading-8 text-foreground/68 sm:text-[1.05rem]">
                       {category.description}
                     </p>
-                    <div className="mt-6 flex flex-wrap gap-3 text-[0.72rem] uppercase tracking-[0.24em] text-foreground/42">
-                      <span>{category.subcategories.length} sections</span>
-                      <span>{category.pieceCount} pieces</span>
-                      <span>{category.archiveImageCount} archive images</span>
-                    </div>
                   </div>
 
                   <div
@@ -242,7 +233,6 @@ export function GalleryPage({ shell }: GalleryPageProps) {
                             {category.leadPiece.title}
                           </button>
                           <div className="mt-4 flex items-center justify-between gap-3 text-[0.72rem] uppercase tracking-[0.22em] text-foreground/40">
-                            <span>{category.leadPiece.archiveCount} images</span>
                             <span>{category.leadPiece.subcategory}</span>
                           </div>
                         </div>
@@ -255,7 +245,7 @@ export function GalleryPage({ shell }: GalleryPageProps) {
                             Documentation for this room is still being assembled.
                           </p>
                         </div>
-                        <p className="text-[0.68rem] uppercase tracking-[0.22em] text-foreground/34">Archive forthcoming</p>
+                        <p className="text-[0.68rem] uppercase tracking-[0.22em] text-foreground/34">Gallery forthcoming</p>
                       </div>
                     )}
                   </div>
@@ -266,11 +256,6 @@ export function GalleryPage({ shell }: GalleryPageProps) {
                     <section key={`${category.name}-${subcategory.name}`} className="space-y-4">
                       <div className="flex items-center justify-between gap-4 border-b border-border/80 pb-3">
                         <h3 className="text-[1.45rem] leading-tight">{subcategory.name}</h3>
-                        <span className="text-xs uppercase tracking-[0.22em] text-foreground/42">
-                          {subcategory.pieces.length > 0
-                            ? `${subcategory.pieces.length} piece${subcategory.pieces.length > 1 ? 's' : ''}`
-                            : 'Archive pending'}
-                        </span>
                       </div>
 
                       {subcategory.pieces.length > 0 ? (

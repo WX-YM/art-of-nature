@@ -147,7 +147,7 @@ export function JournalArticlePage({ content, slug }: JournalArticlePageProps) {
           <aside className="space-y-5 xl:sticky xl:top-28 xl:self-start">
             {supportingImages.length > 0 ? (
               <div className="panel-surface space-y-4 p-4">
-                <p className="text-[0.72rem] uppercase tracking-[0.24em] text-foreground/42">Archive Frames</p>
+                <p className="text-[0.72rem] uppercase tracking-[0.24em] text-foreground/42">Gallery Frames</p>
                 <div className="grid gap-4">
                   {supportingImages.slice(0, 4).map((imageUrl, index) => (
                     <div key={imageUrl} className="overflow-hidden">

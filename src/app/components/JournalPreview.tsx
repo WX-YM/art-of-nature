@@ -1,4 +1,5 @@
 import { ArrowUpRight } from 'lucide-react';
+import { replaceArchiveUiCopy } from '../lib/uiText';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import {
   formatJournalDate,
@@ -24,7 +25,7 @@ export function JournalPreview({ content }: JournalPreviewProps) {
               {content.previewHeading}
             </h2>
             <p className="mt-5 max-w-xl text-[1.02rem] leading-8 text-foreground/72">
-              {content.previewDescription}
+              {replaceArchiveUiCopy(content.previewDescription)}
             </p>
           </div>
 

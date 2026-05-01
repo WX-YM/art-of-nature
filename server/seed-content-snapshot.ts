@@ -47,7 +47,7 @@ export const seedContentSnapshot: SeedContentSnapshot | null = {
   "previewHeading": "Previous Work",
   "previewDescription": "A quiet selection of bespoke pieces, shown as fragments of atmosphere, craft, and material language.",
   "pageEyebrow": "Gallery",
-  "pageHeading": "An editorial archive of crafted interiors.",
+  "pageHeading": "An editorial gallery of crafted interiors.",
   "pageDescription": "Arranged by room rather than product, the gallery reads as a set of atmospheres: furniture, lighting, and details shaped to belong to a space rather than compete with it.",
   "categories": [
     {
@@ -8657,7 +8657,7 @@ export const seedContentSnapshot: SeedContentSnapshot | null = {
   journalContent: {
   "previewEyebrow": "Insights",
   "previewHeading": "Journal",
-  "previewDescription": "Material notes, process observations, and quieter essays from the studio archive.",
+  "previewDescription": "Material notes, process observations, and quieter essays from the studio gallery.",
   "pageEyebrow": "Journal",
   "pageHeading": "Studio Notes",
   "pageDescription": "A slower record of timber, craft, and the decisions that shape each piece long before it enters a room.",
@@ -8751,6 +8751,18 @@ export const seedContentSnapshot: SeedContentSnapshot | null = {
       "href": "tel:+201030422422",
       "label": "+201030422422",
       "_id": "69eab4a34fa53408f8965749"
+    },
+    {
+      "href": "https://wa.me/201030422422",
+      "label": "+201030422422"
+    },
+    {
+      "href": "https://www.instagram.com/artofnatureeg",
+      "label": "Instagram"
+    },
+    {
+      "href": "https://www.facebook.com/artofnatureeg",
+      "label": "Facebook"
     }
   ]
 } as ContactContent,

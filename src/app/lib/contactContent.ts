@@ -40,5 +40,8 @@ export const defaultContactContent: ContactContent = {
   directContacts: [
     { href: 'mailto:info@artofnatureeg.com', label: 'info@artofnatureeg.com' },
     { href: 'tel:+201030422422', label: '+201030422422' },
+    { href: 'https://wa.me/201030422422', label: '+201030422422' },
+    { href: 'https://www.instagram.com/artofnatureeg', label: 'Instagram' },
+    { href: 'https://www.facebook.com/artofnatureeg', label: 'Facebook' },
   ],
 };

@@ -1,6 +1,7 @@
 import { ArrowUpRight } from 'lucide-react';
 import { useState } from 'react';
 import type { GalleryPreviewContent } from '../lib/gallery-public';
+import { replaceArchiveUiCopy } from '../lib/uiText';
 import { GalleryImage } from './GalleryImage';
 import { GalleryPieceViewer } from './GalleryPieceViewer';
 
@@ -27,7 +28,7 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
               {content.previewHeading}
             </h2>
             <p className="mt-5 max-w-xl text-[1.03rem] leading-8 text-foreground/72">
-              {content.previewDescription}
+              {replaceArchiveUiCopy(content.previewDescription)}
             </p>
           </div>
 
@@ -70,11 +71,8 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
                     {piece.title}
                   </h3>
                   <p className="text-sm leading-7 text-foreground/68 sm:text-base">{piece.material}</p>
-                  <p className="text-xs uppercase tracking-[0.22em] text-foreground/42">
-                    Archive set · {piece.archiveCount} image{piece.archiveCount === 1 ? '' : 's'}
-                  </p>
                   <div className="inline-flex items-center gap-2 pt-1 text-xs uppercase tracking-[0.2em] text-foreground/55 transition-colors group-hover:text-accent">
-                    Open archive
+                    Open gallery
                     <ArrowUpRight size={14} />
                   </div>
                 </div>
@@ -107,11 +105,8 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
                     {piece.title}
                   </h3>
                   <p className="mt-3 text-sm leading-7 text-foreground/68">{piece.note}</p>
-                  <p className="mt-4 text-xs uppercase tracking-[0.22em] text-foreground/42">
-                    Archive set · {piece.archiveCount} image{piece.archiveCount === 1 ? '' : 's'}
-                  </p>
                   <div className="mt-4 inline-flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-foreground/55 transition-colors group-hover:text-accent">
-                    Open archive
+                    Open gallery
                     <ArrowUpRight size={14} />
                   </div>
                 </div>
@@ -122,7 +117,7 @@ export function GalleryPreview({ content }: GalleryPreviewProps) {
               <div>
                 <p className="section-kicker mb-3">Editorial Note</p>
                 <h3 className="text-[2rem] leading-tight text-foreground sm:text-[2.5rem]">
-                  A living archive of bespoke craftsmanship and material character.
+                  A living gallery of bespoke craftsmanship and material character.
                 </h3>
                 <p className="mt-4 text-sm leading-8 text-foreground/72 sm:text-base">
                   This gallery is a showcase of Art of Nature&apos;s work across furniture, lighting, and handcrafted details, brought together as a record of making rather than a catalogue of products.

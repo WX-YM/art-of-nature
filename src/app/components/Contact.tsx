@@ -1,5 +1,7 @@
+import { Facebook, Instagram, Mail, MessageCircle, Phone } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { ContactContent } from '../lib/contactContent';
+import { resolveContactLinks } from '../lib/contactLinks';
 
 type ContactProps = {
   content: ContactContent;
@@ -38,12 +40,17 @@ export function Contact({ content }: ContactProps) {
   const submitText = content.submitText?.trim();
 
   const directContactLabel = content.directContactLabel?.trim();
-  const directContacts = content.directContacts
-    .map((contact) => ({
-      href: contact.href?.trim(),
-      label: contact.label?.trim(),
-    }))
-    .filter((contact): contact is { href: string; label: string } => Boolean(contact.href && contact.label));
+  const directContacts = resolveContactLinks(content.directContacts);
+  const primaryDirectContacts = directContacts.filter((contact) => contact.kind === 'email' || contact.kind === 'phone');
+
+  const iconByKind = {
+    email: Mail,
+    phone: Phone,
+    whatsapp: MessageCircle,
+    instagram: Instagram,
+    facebook: Facebook,
+    link: Mail,
+  } as const;
 
   return (
     <section id="contact" className="py-32 bg-background">
@@ -154,15 +161,34 @@ export function Contact({ content }: ContactProps) {
         <div className="mt-16 pt-16 border-t border-border text-center">
           {directContactLabel && <p className="mb-4 opacity-60">{directContactLabel}</p>}
           {directContacts.length > 0 && (
-            <div className="flex flex-col md:flex-row gap-6 justify-center items-center opacity-80">
-              {directContacts.map((contact, index) => (
-                <span key={`${contact.href}-${index}`} className="contents">
-                  <a href={contact.href} className="hover:text-accent transition-colors">
-                    {contact.label}
-                  </a>
-                  {index < directContacts.length - 1 && <span className="hidden md:inline opacity-30">·</span>}
-                </span>
-              ))}
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row gap-6 justify-center items-center opacity-80">
+                {primaryDirectContacts.map((contact, index) => (
+                  <span key={`${contact.href}-${index}`} className="contents">
+                    <a href={contact.href} className="hover:text-accent transition-colors">
+                      {contact.label}
+                    </a>
+                    {index < primaryDirectContacts.length - 1 && <span className="hidden md:inline opacity-30">·</span>}
+                  </span>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-4 opacity-80">
+                {directContacts.map((contact) => {
+                  const Icon = iconByKind[contact.kind];
+
+                  return (
+                    <a
+                      key={`${contact.kind}-${contact.href}`}
+                      href={contact.href}
+                      aria-label={contact.kind === 'whatsapp' ? 'WhatsApp' : contact.label}
+                      title={contact.kind === 'whatsapp' ? 'WhatsApp' : contact.label}
+                      className="inline-flex h-11 w-11 items-center justify-center border border-border bg-white text-foreground transition-colors hover:border-accent hover:text-accent"
+                    >
+                      <Icon size={18} />
+                    </a>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

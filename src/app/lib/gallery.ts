@@ -1442,7 +1442,7 @@ export const defaultGalleryContent: GalleryContent = {
   previewDescription:
     'A quiet selection of bespoke pieces, shown as fragments of atmosphere, craft, and material language.',
   pageEyebrow: 'Gallery',
-  pageHeading: 'An editorial archive of crafted interiors.',
+  pageHeading: 'An editorial gallery of crafted interiors.',
   pageDescription:
     'Arranged by room rather than product, the gallery reads as a set of atmospheres: furniture, lighting, and details shaped to belong to a space rather than compete with it.',
   categories: categoryDefinitions,

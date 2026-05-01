@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, ArrowUpRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowUpRight, ChevronDown, Facebook, Instagram, MessageCircle } from 'lucide-react';
 import { fetchGalleryPieceDetail, primeGalleryPieceDetail } from '../lib/gallery-client';
+import { defaultContactContent } from '../lib/contactContent';
+import { resolveContactLinks } from '../lib/contactLinks';
 import {
   getGalleryCategoryHref,
   type PublicGalleryPieceDetail,
@@ -8,6 +10,7 @@ import {
 } from '../lib/gallery-public';
 import { GalleryImage } from './GalleryImage';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
 
 type GalleryPieceViewerProps = {
   piece: PublicGalleryPieceSummary | null;
@@ -51,7 +54,7 @@ export function GalleryPieceViewer({
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
-          setDetailError(error instanceof Error ? error.message : 'Unable to load archive frames.');
+          setDetailError(error instanceof Error ? error.message : 'Unable to load gallery frames.');
         }
       })
       .finally(() => {
@@ -68,6 +71,10 @@ export function GalleryPieceViewer({
   const pieceData = detail ?? piece;
   const images = detail?.images ?? (piece ? [piece.image] : []);
   const currentContentVersion = detail?.contentVersion ?? assetVersion ?? undefined;
+  const contactLinks = resolveContactLinks(defaultContactContent.directContacts);
+  const whatsappLink = contactLinks.find((contact) => contact.kind === 'whatsapp');
+  const instagramLink = contactLinks.find((contact) => contact.kind === 'instagram');
+  const facebookLink = contactLinks.find((contact) => contact.kind === 'facebook');
 
   useEffect(() => {
     if (!open || images.length < 2) {
@@ -154,15 +161,10 @@ export function GalleryPieceViewer({
                   {isLoadingDetail ? (
                     <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
                       <div className="rounded-full border border-white/55 bg-black/30 px-4 py-2 text-[0.7rem] uppercase tracking-[0.24em] text-white backdrop-blur-sm">
-                        Loading archive frames
+                        Loading gallery frames
                       </div>
                     </div>
                   ) : null}
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/28 via-transparent to-transparent px-5 pb-5 pt-10">
-                    <p className="text-[0.72rem] uppercase tracking-[0.24em] text-white/78">
-                      Archive frame {safeImageIndex + 1}
-                    </p>
-                  </div>
                 </div>
               </div>
             </div>
@@ -181,23 +183,55 @@ export function GalleryPieceViewer({
                   {pieceData.material}
                 </DialogDescription>
                 <p className="text-sm leading-7 text-foreground/64 sm:text-[0.98rem]">{pieceData.note}</p>
-                <div className="flex flex-wrap gap-3 text-xs uppercase tracking-[0.24em] text-foreground/42">
-                  <span>{pieceData.archiveCount} image{pieceData.archiveCount === 1 ? '' : 's'}</span>
-                  <span>Inquire for Details</span>
-                </div>
                 <div className="flex flex-wrap gap-3">
-                  <a
-                    href="/#contact"
-                    className="inline-flex items-center gap-2 border border-primary bg-primary px-4 py-3 text-xs uppercase tracking-[0.16em] text-primary-foreground transition-colors hover:border-accent hover:bg-accent"
-                  >
-                    Inquire for Details
-                    <ArrowUpRight size={15} />
-                  </a>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-2 border border-primary bg-primary px-4 py-3 text-xs uppercase tracking-[0.16em] text-primary-foreground transition-colors hover:border-accent hover:bg-accent"
+                      >
+                        Inquire for Details
+                        <ChevronDown size={15} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="min-w-[13rem]">
+                      {whatsappLink ? (
+                        <DropdownMenuItem asChild>
+                          <a href={whatsappLink.href} className="cursor-pointer">
+                            <MessageCircle size={16} />
+                            WhatsApp
+                          </a>
+                        </DropdownMenuItem>
+                      ) : null}
+                      {instagramLink ? (
+                        <DropdownMenuItem asChild>
+                          <a href={instagramLink.href} className="cursor-pointer">
+                            <Instagram size={16} />
+                            Instagram
+                          </a>
+                        </DropdownMenuItem>
+                      ) : null}
+                      {facebookLink ? (
+                        <DropdownMenuItem asChild>
+                          <a href={facebookLink.href} className="cursor-pointer">
+                            <Facebook size={16} />
+                            Facebook
+                          </a>
+                        </DropdownMenuItem>
+                      ) : null}
+                      <DropdownMenuItem asChild>
+                        <a href="/#contact" className="cursor-pointer">
+                          <ArrowUpRight size={16} />
+                          Contact Us
+                        </a>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <a
                     href={getGalleryCategoryHref(pieceData.category)}
                     className="inline-flex items-center gap-2 border border-border bg-white px-4 py-3 text-xs uppercase tracking-[0.16em] text-foreground transition-colors hover:border-accent hover:text-accent"
                   >
-                    Open Room Section
+                    Open Gallery Section
                     <ArrowUpRight size={15} />
                   </a>
                 </div>
@@ -206,7 +240,7 @@ export function GalleryPieceViewer({
               <div className="min-h-0 flex-1 overflow-visible px-5 py-5 sm:px-6 md:overflow-y-auto md:overscroll-contain md:[-webkit-overflow-scrolling:touch]">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <p className="text-[0.75rem] uppercase tracking-[0.28em] text-foreground/48">
-                    Archive Images
+                    Gallery Images
                   </p>
                   <p className="text-[0.72rem] uppercase tracking-[0.24em] text-foreground/38">
                     {detail ? 'Select a frame' : 'Loading frames'}

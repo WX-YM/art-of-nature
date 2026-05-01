@@ -53,7 +53,7 @@ export const defaultJournalContent: JournalContent = {
   previewEyebrow: 'Insights',
   previewHeading: 'Journal',
   previewDescription:
-    'Material notes, process observations, and quieter essays from the studio archive.',
+    'Material notes, process observations, and quieter essays from the studio gallery.',
   pageEyebrow: 'Journal',
   pageHeading: 'Studio Notes',
   pageDescription:
