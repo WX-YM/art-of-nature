@@ -1,13 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, ArrowUpRight, ChevronDown, Facebook, Instagram, MessageCircle } from 'lucide-react';
 import { fetchGalleryPieceDetail, primeGalleryPieceDetail } from '../lib/gallery-client';
 import { defaultContactContent } from '../lib/contactContent';
 import { resolveContactLinks } from '../lib/contactLinks';
-import {
-  getGalleryCategoryHref,
-  type PublicGalleryPieceDetail,
-  type PublicGalleryPieceSummary,
-} from '../lib/gallery-public';
+import { type PublicGalleryPieceDetail, type PublicGalleryPieceSummary } from '../lib/gallery-public';
 import { GalleryImage } from './GalleryImage';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
@@ -31,6 +27,7 @@ export function GalleryPieceViewer({
   const [detail, setDetail] = useState<PublicGalleryPieceDetail | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const mainImageRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setActiveImageIndex(initialImageIndex);
@@ -113,6 +110,20 @@ export function GalleryPieceViewer({
     setActiveImageIndex((current) => (current + direction + images.length) % images.length);
   };
 
+  const handleFrameSelect = (index: number) => {
+    setActiveImageIndex(index);
+
+    if (!open || !mainImageRef.current) {
+      return;
+    }
+
+    mainImageRef.current.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+      inline: 'nearest',
+    });
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="grid h-[min(94dvh,60rem)] max-h-[94dvh] w-[min(1440px,calc(100vw-1rem))] max-w-[min(1440px,calc(100vw-1rem))] gap-0 overflow-y-auto overscroll-contain border-border bg-[#f6f1ea] p-0 shadow-[0_42px_120px_rgba(28,24,21,0.24)] [touch-action:pan-y] [-webkit-overflow-scrolling:touch] sm:max-w-[min(1440px,calc(100vw-2rem))] md:overflow-hidden md:[touch-action:auto] md:grid-cols-[minmax(0,1.15fr)_22rem] xl:grid-cols-[minmax(0,1.4fr)_24rem] 2xl:grid-cols-[minmax(0,1.55fr)_26rem] [&>button]:right-4 [&>button]:top-4 [&>button]:rounded-full [&>button]:border [&>button]:border-border [&>button]:bg-white/90 [&>button]:p-2 [&>button]:backdrop-blur-sm">
@@ -128,7 +139,7 @@ export function GalleryPieceViewer({
                 </p>
               </div>
 
-              <div className="relative min-h-0 flex-1 p-3 sm:p-4 xl:p-5">
+              <div ref={mainImageRef} className="relative min-h-0 flex-1 p-3 sm:p-4 xl:p-5">
                 <div className="relative h-[20rem] overflow-hidden rounded-[1.6rem] bg-[linear-gradient(180deg,#f6efe6,#e9decf)] shadow-[0_26px_70px_rgba(45,41,38,0.12)] sm:h-[24rem] md:h-full">
                   <GalleryImage
                     asset={activeImage}
@@ -227,13 +238,6 @@ export function GalleryPieceViewer({
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <a
-                    href={getGalleryCategoryHref(pieceData.category)}
-                    className="inline-flex items-center gap-2 border border-border bg-white px-4 py-3 text-xs uppercase tracking-[0.16em] text-foreground transition-colors hover:border-accent hover:text-accent"
-                  >
-                    Open Gallery Section
-                    <ArrowUpRight size={15} />
-                  </a>
                 </div>
               </div>
 
@@ -262,7 +266,7 @@ export function GalleryPieceViewer({
                         <button
                           key={`${pieceData.id}-${image.src}-${index}`}
                           type="button"
-                          onClick={() => setActiveImageIndex(index)}
+                          onClick={() => handleFrameSelect(index)}
                           className={`overflow-hidden rounded-[1.15rem] border bg-white text-left shadow-[0_16px_35px_rgba(45,41,38,0.08)] transition-all ${
                             isActive
                               ? 'border-accent ring-1 ring-accent'
