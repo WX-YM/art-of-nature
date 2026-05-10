@@ -100,6 +100,7 @@ test('admin dashboard script parses successfully and renders per-image gallery a
   assert.match(galleryHtml, /data-edit-gallery-image=/);
   assert.match(galleryHtml, /data-add-gallery-image-url/);
   assert.match(galleryHtml, /data-focus-upload-field="newImageUrl"/);
+  assert.match(galleryHtml, /name="gallerySubcategories:/);
   assert.match(galleryHtml, /Replace frame|Edit frame/);
   assert.match(galleryHtml, /Use as cover/);
   assert.match(galleryHtml, /Move left/);

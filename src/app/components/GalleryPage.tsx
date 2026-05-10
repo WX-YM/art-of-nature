@@ -113,6 +113,7 @@ export function GalleryPage({ shell }: GalleryPageProps) {
   const [summary, setSummary] = useState<PublicGallerySummary | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [isLoadingSummary, setIsLoadingSummary] = useState(true);
+  const [pendingCategoryId, setPendingCategoryId] = useState<string | null>(null);
   const [viewerState, setViewerState] = useState<{ piece: PublicGalleryPieceSummary | null; imageIndex: number }>({
     piece: null,
     imageIndex: 0,
@@ -143,6 +144,45 @@ export function GalleryPage({ shell }: GalleryPageProps) {
       controller.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const syncPendingCategoryFromHash = () => {
+      const categoryId = decodeURIComponent(window.location.hash.replace(/^#/, '')).trim();
+      setPendingCategoryId(categoryId || null);
+    };
+
+    syncPendingCategoryFromHash();
+    window.addEventListener('hashchange', syncPendingCategoryFromHash);
+
+    return () => {
+      window.removeEventListener('hashchange', syncPendingCategoryFromHash);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pendingCategoryId || isLoadingSummary || typeof window === 'undefined') {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const targetElement = document.getElementById(pendingCategoryId);
+
+      if (!targetElement) {
+        return;
+      }
+
+      targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setPendingCategoryId(null);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [isLoadingSummary, pendingCategoryId, summary]);
 
   const displayShell = summary ?? shell;
   const currentContentVersion = summary?.contentVersion ?? shell?.contentVersion ?? 0;

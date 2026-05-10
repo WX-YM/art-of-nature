@@ -19,6 +19,20 @@ export function About({ content }: AboutProps) {
   const imageUrl = content.imageUrl?.trim();
   const imageAlt = content.imageAlt?.trim();
 
+  if (
+    !eyebrow &&
+    !heading &&
+    !paragraph1 &&
+    !paragraph2 &&
+    !paragraph3 &&
+    focusPoints.length === 0 &&
+    !processEyebrow &&
+    !processDescription &&
+    !imageUrl
+  ) {
+    return null;
+  }
+
   return (
     <section id="about" className="scroll-mt-28 bg-white py-20 sm:py-24 lg:py-32">
       <div className="section-shell">

@@ -26,15 +26,25 @@ function shouldHandleClientNavigation(event: MouseEvent<HTMLAnchorElement>, href
   );
 }
 
+function shouldCloseMenuOnClick(event: MouseEvent<HTMLAnchorElement>) {
+  return (
+    event.button === 0 &&
+    !event.defaultPrevented &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey
+  );
+}
+
 export function Navigation({ currentPath = '/', onNavigate }: NavigationProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const isDetachedPage = currentPath !== '/';
-  const isJournalPage = currentPath === '/journal' || currentPath.startsWith('/journal/');
   const navigationItems = [
     { href: '/gallery', label: 'Gallery' },
     { href: isDetachedPage ? '/#about' : '#about', label: 'About' },
-    { href: isJournalPage ? '/journal' : isDetachedPage ? '/#journal' : '#journal', label: 'Journal' },
+    { href: '/journal', label: 'Journal' },
   ];
   const homeHref = isDetachedPage ? '/' : '#top';
   const contactHref = isDetachedPage ? '/#contact' : '#contact';
@@ -61,6 +71,10 @@ export function Navigation({ currentPath = '/', onNavigate }: NavigationProps) {
   }, [isMenuOpen]);
 
   const handleNavigationClick = (event: MouseEvent<HTMLAnchorElement>, href: string) => {
+    if (shouldCloseMenuOnClick(event)) {
+      setIsMenuOpen(false);
+    }
+
     if (!onNavigate || !shouldHandleClientNavigation(event, href)) {
       return;
     }

@@ -42,6 +42,26 @@ export function Contact({ content }: ContactProps) {
   const directContactLabel = content.directContactLabel?.trim();
   const directContacts = resolveContactLinks(content.directContacts);
   const primaryDirectContacts = directContacts.filter((contact) => contact.kind === 'email' || contact.kind === 'phone');
+  const showContactForm = Boolean(
+    nameLabel ||
+    namePlaceholder ||
+    emailLabel ||
+    emailPlaceholder ||
+    projectTypeLabel ||
+    projectDefaultOption ||
+    projectOptions?.length ||
+    messageLabel ||
+    messagePlaceholder ||
+    submitText
+  );
+  const hasVisibleContent = Boolean(
+    eyebrow ||
+    heading ||
+    description ||
+    showContactForm ||
+    directContactLabel ||
+    directContacts.length
+  );
 
   const iconByKind = {
     email: Mail,
@@ -51,6 +71,10 @@ export function Contact({ content }: ContactProps) {
     facebook: Facebook,
     link: Mail,
   } as const;
+
+  if (!hasVisibleContent) {
+    return null;
+  }
 
   return (
     <section id="contact" className="py-32 bg-background">
@@ -85,6 +109,7 @@ export function Contact({ content }: ContactProps) {
           </div>
         ) : null}
 
+        {showContactForm ? (
         <form className="space-y-6" action="/api/contact/messages" method="post">
           <div className="grid md:grid-cols-2 gap-6">
             <div>
@@ -157,7 +182,9 @@ export function Contact({ content }: ContactProps) {
             </button>
           )}
         </form>
+        ) : null}
 
+        {directContactLabel || directContacts.length > 0 ? (
         <div className="mt-16 pt-16 border-t border-border text-center">
           {directContactLabel && <p className="mb-4 opacity-60">{directContactLabel}</p>}
           {directContacts.length > 0 && (
@@ -192,6 +219,7 @@ export function Contact({ content }: ContactProps) {
             </div>
           )}
         </div>
+        ) : null}
       </div>
     </section>
   );

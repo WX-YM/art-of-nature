@@ -91,8 +91,8 @@ const tlsPublicChainPath = readCliOption('--pub');
 
 const app = express();
 app.set('trust proxy', true);
-app.use(express.json({ limit: '32mb' }));
-app.use(express.urlencoded({ extended: true, limit: '32mb' }));
+app.use(express.json({ limit: Number.MAX_SAFE_INTEGER }));
+app.use(express.urlencoded({ extended: true, limit: Number.MAX_SAFE_INTEGER }));
 app.use('/uploads', express.static(uploadsDir));
 app.use('/downloads', express.static(downloadsDir));
 app.use('/api', (req, res, next) => {
@@ -636,6 +636,7 @@ function parseJournalPostsJson(body: unknown): JournalPost[] {
 }
 
 import {
+  parseOptionalStringField,
   parseRequiredStringField,
   parseMultilineField,
   toContactLinksText,
@@ -1421,16 +1422,16 @@ app.get('/admin', async (req, res, next) => {
         <h2>Hero Content</h2>
         <p class="section-intro">Shape the first impression of the site with the opening lines, call to action, and full-bleed hero image.</p>
         <form method="post" action="/admin/content/hero" data-image-upload-form data-image-upload-target="backgroundImageUrl">
-          <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(hero.eyebrow)}" /></label></p>
-          <p><label>Heading Line 1<br /><input name="headingLine1" required style="width:100%;" value="${escapeHtml(hero.headingLine1)}" /></label></p>
-          <p><label>Heading Line 2<br /><input name="headingLine2" required style="width:100%;" value="${escapeHtml(hero.headingLine2)}" /></label></p>
-          <p><label>Description<br /><textarea name="description" required style="width:100%; min-height: 70px;">${escapeHtml(hero.description)}</textarea></label></p>
-          <p><label>CTA Text<br /><input name="ctaText" required style="width:100%;" value="${escapeHtml(hero.ctaText)}" /></label></p>
-          <p><label>CTA Href<br /><input name="ctaHref" required style="width:100%;" value="${escapeHtml(hero.ctaHref)}" /></label></p>
-          <p><label>Background Image URL<br /><input name="backgroundImageUrl" required style="width:100%;" value="${escapeHtml(hero.backgroundImageUrl)}" /></label></p>
+          <p><label>Eyebrow<br /><input name="eyebrow" style="width:100%;" value="${escapeHtml(hero.eyebrow)}" /></label></p>
+          <p><label>Heading Line 1<br /><input name="headingLine1" style="width:100%;" value="${escapeHtml(hero.headingLine1)}" /></label></p>
+          <p><label>Heading Line 2<br /><input name="headingLine2" style="width:100%;" value="${escapeHtml(hero.headingLine2)}" /></label></p>
+          <p><label>Description<br /><textarea name="description" style="width:100%; min-height: 70px;">${escapeHtml(hero.description)}</textarea></label></p>
+          <p><label>CTA Text<br /><input name="ctaText" style="width:100%;" value="${escapeHtml(hero.ctaText)}" /></label></p>
+          <p><label>CTA Href<br /><input name="ctaHref" style="width:100%;" value="${escapeHtml(hero.ctaHref)}" /></label></p>
+          <p><label>Background Image URL<br /><input name="backgroundImageUrl" style="width:100%;" value="${escapeHtml(hero.backgroundImageUrl)}" /></label></p>
           <p class="upload-help">Upload an image to auto-fill Background Image URL.</p>
           <p class="upload-row"><input type="file" class="image-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" data-target-field="backgroundImageUrl" /><button type="button" class="image-upload-button" data-target-field="backgroundImageUrl">Upload Image</button><span class="upload-inline-status" data-upload-status-for="backgroundImageUrl"></span></p>
-          <p><label>Background Image Alt<br /><input name="backgroundImageAlt" required style="width:100%;" value="${escapeHtml(hero.backgroundImageAlt)}" /></label></p>
+          <p><label>Background Image Alt<br /><input name="backgroundImageAlt" style="width:100%;" value="${escapeHtml(hero.backgroundImageAlt)}" /></label></p>
           <p><button type="submit">Save Hero</button></p>
         </form>
       </section>
@@ -1439,18 +1440,18 @@ app.get('/admin', async (req, res, next) => {
         <h2>About Content</h2>
         <p class="section-intro">Refine the studio story, process notes, and portrait image without touching the layout itself.</p>
         <form method="post" action="/admin/content/about" data-image-upload-form data-image-upload-target="imageUrl">
-          <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(about.eyebrow)}" /></label></p>
-          <p><label>Heading<br /><input name="heading" required style="width:100%;" value="${escapeHtml(about.heading)}" /></label></p>
-          <p><label>Paragraph 1<br /><textarea name="paragraph1" required style="width:100%; min-height: 70px;">${escapeHtml(about.paragraph1)}</textarea></label></p>
-          <p><label>Paragraph 2<br /><textarea name="paragraph2" required style="width:100%; min-height: 70px;">${escapeHtml(about.paragraph2)}</textarea></label></p>
-          <p><label>Paragraph 3<br /><textarea name="paragraph3" required style="width:100%; min-height: 70px;">${escapeHtml(about.paragraph3)}</textarea></label></p>
-          <p><label>Focus Boxes (one per line)<br /><textarea name="focusPoints" required style="width:100%; min-height: 90px;">${escapeHtml(about.focusPoints.join('\n'))}</textarea></label></p>
-          <p><label>Process Kicker<br /><input name="processEyebrow" required style="width:100%;" value="${escapeHtml(about.processEyebrow)}" /></label></p>
-          <p><label>Process Description<br /><textarea name="processDescription" required style="width:100%; min-height: 70px;">${escapeHtml(about.processDescription)}</textarea></label></p>
-          <p><label>Image URL<br /><input name="imageUrl" required style="width:100%;" value="${escapeHtml(about.imageUrl)}" /></label></p>
+          <p><label>Eyebrow<br /><input name="eyebrow" style="width:100%;" value="${escapeHtml(about.eyebrow)}" /></label></p>
+          <p><label>Heading<br /><input name="heading" style="width:100%;" value="${escapeHtml(about.heading)}" /></label></p>
+          <p><label>Paragraph 1<br /><textarea name="paragraph1" style="width:100%; min-height: 70px;">${escapeHtml(about.paragraph1)}</textarea></label></p>
+          <p><label>Paragraph 2<br /><textarea name="paragraph2" style="width:100%; min-height: 70px;">${escapeHtml(about.paragraph2)}</textarea></label></p>
+          <p><label>Paragraph 3<br /><textarea name="paragraph3" style="width:100%; min-height: 70px;">${escapeHtml(about.paragraph3)}</textarea></label></p>
+          <p><label>Focus Boxes (one per line)<br /><textarea name="focusPoints" style="width:100%; min-height: 90px;">${escapeHtml(about.focusPoints.join('\n'))}</textarea></label></p>
+          <p><label>Process Kicker<br /><input name="processEyebrow" style="width:100%;" value="${escapeHtml(about.processEyebrow)}" /></label></p>
+          <p><label>Process Description<br /><textarea name="processDescription" style="width:100%; min-height: 70px;">${escapeHtml(about.processDescription)}</textarea></label></p>
+          <p><label>Image URL<br /><input name="imageUrl" style="width:100%;" value="${escapeHtml(about.imageUrl)}" /></label></p>
           <p class="upload-help">Upload an image to auto-fill About Image URL.</p>
           <p class="upload-row"><input type="file" class="image-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" data-target-field="imageUrl" /><button type="button" class="image-upload-button" data-target-field="imageUrl">Upload Image</button><span class="upload-inline-status" data-upload-status-for="imageUrl"></span></p>
-          <p><label>Image Alt<br /><input name="imageAlt" required style="width:100%;" value="${escapeHtml(about.imageAlt)}" /></label></p>
+          <p><label>Image Alt<br /><input name="imageAlt" style="width:100%;" value="${escapeHtml(about.imageAlt)}" /></label></p>
           <p><button type="submit">Save About</button></p>
         </form>
       </section>
@@ -1459,21 +1460,21 @@ app.get('/admin', async (req, res, next) => {
         <h2>Contact Content</h2>
         <p class="section-intro">Control the language, labels, and direct contact links that shape the inquiry experience on the public site.</p>
         <form method="post" action="/admin/content/contact">
-          <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(contact.eyebrow)}" /></label></p>
-          <p><label>Heading<br /><input name="heading" required style="width:100%;" value="${escapeHtml(contact.heading)}" /></label></p>
-          <p><label>Description<br /><textarea name="description" required style="width:100%; min-height: 70px;">${escapeHtml(contact.description)}</textarea></label></p>
-          <p><label>Name Label<br /><input name="nameLabel" required style="width:100%;" value="${escapeHtml(contact.nameLabel)}" /></label></p>
-          <p><label>Name Placeholder<br /><input name="namePlaceholder" required style="width:100%;" value="${escapeHtml(contact.namePlaceholder)}" /></label></p>
-          <p><label>Email Label<br /><input name="emailLabel" required style="width:100%;" value="${escapeHtml(contact.emailLabel)}" /></label></p>
-          <p><label>Email Placeholder<br /><input name="emailPlaceholder" required style="width:100%;" value="${escapeHtml(contact.emailPlaceholder)}" /></label></p>
-          <p><label>Project Type Label<br /><input name="projectTypeLabel" required style="width:100%;" value="${escapeHtml(contact.projectTypeLabel)}" /></label></p>
-          <p><label>Project Default Option<br /><input name="projectDefaultOption" required style="width:100%;" value="${escapeHtml(contact.projectDefaultOption)}" /></label></p>
-          <p><label>Project Options (one per line)<br /><textarea name="projectOptions" required style="width:100%; min-height: 90px;">${escapeHtml(contact.projectOptions.join('\n'))}</textarea></label></p>
-          <p><label>Message Label<br /><input name="messageLabel" required style="width:100%;" value="${escapeHtml(contact.messageLabel)}" /></label></p>
-          <p><label>Message Placeholder<br /><textarea name="messagePlaceholder" required style="width:100%; min-height: 70px;">${escapeHtml(contact.messagePlaceholder)}</textarea></label></p>
-          <p><label>Submit Text<br /><input name="submitText" required style="width:100%;" value="${escapeHtml(contact.submitText)}" /></label></p>
-          <p><label>Direct Contact Label<br /><input name="directContactLabel" required style="width:100%;" value="${escapeHtml(contact.directContactLabel)}" /></label></p>
-          <p><label>Direct Contacts (href | label, one per line)<br /><textarea name="directContacts" required style="width:100%; min-height: 90px;">${escapeHtml(toContactLinksText(contact.directContacts))}</textarea></label></p>
+          <p><label>Eyebrow<br /><input name="eyebrow" style="width:100%;" value="${escapeHtml(contact.eyebrow)}" /></label></p>
+          <p><label>Heading<br /><input name="heading" style="width:100%;" value="${escapeHtml(contact.heading)}" /></label></p>
+          <p><label>Description<br /><textarea name="description" style="width:100%; min-height: 70px;">${escapeHtml(contact.description)}</textarea></label></p>
+          <p><label>Name Label<br /><input name="nameLabel" style="width:100%;" value="${escapeHtml(contact.nameLabel)}" /></label></p>
+          <p><label>Name Placeholder<br /><input name="namePlaceholder" style="width:100%;" value="${escapeHtml(contact.namePlaceholder)}" /></label></p>
+          <p><label>Email Label<br /><input name="emailLabel" style="width:100%;" value="${escapeHtml(contact.emailLabel)}" /></label></p>
+          <p><label>Email Placeholder<br /><input name="emailPlaceholder" style="width:100%;" value="${escapeHtml(contact.emailPlaceholder)}" /></label></p>
+          <p><label>Project Type Label<br /><input name="projectTypeLabel" style="width:100%;" value="${escapeHtml(contact.projectTypeLabel)}" /></label></p>
+          <p><label>Project Default Option<br /><input name="projectDefaultOption" style="width:100%;" value="${escapeHtml(contact.projectDefaultOption)}" /></label></p>
+          <p><label>Project Options (one per line)<br /><textarea name="projectOptions" style="width:100%; min-height: 90px;">${escapeHtml(contact.projectOptions.join('\n'))}</textarea></label></p>
+          <p><label>Message Label<br /><input name="messageLabel" style="width:100%;" value="${escapeHtml(contact.messageLabel)}" /></label></p>
+          <p><label>Message Placeholder<br /><textarea name="messagePlaceholder" style="width:100%; min-height: 70px;">${escapeHtml(contact.messagePlaceholder)}</textarea></label></p>
+          <p><label>Submit Text<br /><input name="submitText" style="width:100%;" value="${escapeHtml(contact.submitText)}" /></label></p>
+          <p><label>Direct Contact Label<br /><input name="directContactLabel" style="width:100%;" value="${escapeHtml(contact.directContactLabel)}" /></label></p>
+          <p><label>Direct Contacts (href | label, one per line)<br /><textarea name="directContacts" style="width:100%; min-height: 90px;">${escapeHtml(toContactLinksText(contact.directContacts))}</textarea></label></p>
           <p><button type="submit">Save Contact</button></p>
         </form>
       </section>
@@ -1481,10 +1482,10 @@ app.get('/admin', async (req, res, next) => {
         <h2>Craftsmanship Content</h2>
         <p class="section-intro">Update the supporting craftsmanship section that frames the studio’s approach without turning it commercial.</p>
         <form method="post" action="/admin/content/craftsmanship">
-          <p><label>Eyebrow<br /><input name="eyebrow" required style="width:100%;" value="${escapeHtml(craftsmanship.eyebrow)}" /></label></p>
-          <p><label>Heading<br /><input name="heading" required style="width:100%;" value="${escapeHtml(craftsmanship.heading)}" /></label></p>
-          <p><label>Description<br /><textarea name="description" required style="width:100%; min-height: 70px;">${escapeHtml(craftsmanship.description)}</textarea></label></p>
-          <p><label>Cards (title | description, one per line)<br /><textarea name="items" required style="width:100%; min-height: 110px;">${escapeHtml(toCraftsmanshipItemsText(craftsmanship.items))}</textarea></label></p>
+          <p><label>Eyebrow<br /><input name="eyebrow" style="width:100%;" value="${escapeHtml(craftsmanship.eyebrow)}" /></label></p>
+          <p><label>Heading<br /><input name="heading" style="width:100%;" value="${escapeHtml(craftsmanship.heading)}" /></label></p>
+          <p><label>Description<br /><textarea name="description" style="width:100%; min-height: 70px;">${escapeHtml(craftsmanship.description)}</textarea></label></p>
+          <p><label>Cards (title | description, one per line)<br /><textarea name="items" style="width:100%; min-height: 110px;">${escapeHtml(toCraftsmanshipItemsText(craftsmanship.items))}</textarea></label></p>
           <p><button type="submit">Save Craftsmanship</button></p>
         </form>
       </section>
@@ -1543,6 +1544,7 @@ app.get('/admin', async (req, res, next) => {
                   </div>
                   <p><label>Rank<br /><input type="number" name="galleryRank:${escapeHtml(category.name)}" value="${escapeHtml(String(category.rank ?? 0))}" /></label></p>
                   <p><label>Eyebrow (for room header / future use)<br /><input name="galleryEyebrow:${escapeHtml(category.name)}" required value="${escapeHtml(category.eyebrow)}" /></label></p>
+                  <p><label>Subcategories<br /><textarea name="gallerySubcategories:${escapeHtml(category.name)}" style="min-height:110px;">${escapeHtml(category.subcategories.join('\n'))}</textarea></label></p>
                   <p><label>Description<br /><textarea name="galleryDescription:${escapeHtml(category.name)}" required style="min-height:110px;">${escapeHtml(category.description)}</textarea></label></p>
                 </div>`;
                 }
@@ -4411,14 +4413,14 @@ app.post('/admin/content/hero', async (req, res, next) => {
     }
 
     const content: HeroContent = {
-      eyebrow: parseRequiredStringField(req.body, 'eyebrow', 200),
-      headingLine1: parseRequiredStringField(req.body, 'headingLine1', 200),
-      headingLine2: parseRequiredStringField(req.body, 'headingLine2', 200),
-      description: parseRequiredStringField(req.body, 'description', 2000),
-      ctaText: parseRequiredStringField(req.body, 'ctaText', 120),
-      ctaHref: parseRequiredStringField(req.body, 'ctaHref', 500),
-      backgroundImageUrl: parseRequiredStringField(req.body, 'backgroundImageUrl', 2000),
-      backgroundImageAlt: parseRequiredStringField(req.body, 'backgroundImageAlt', 200),
+      eyebrow: parseOptionalStringField(req.body, 'eyebrow', 200),
+      headingLine1: parseOptionalStringField(req.body, 'headingLine1', 200),
+      headingLine2: parseOptionalStringField(req.body, 'headingLine2', 200),
+      description: parseOptionalStringField(req.body, 'description', 2000),
+      ctaText: parseOptionalStringField(req.body, 'ctaText', 120),
+      ctaHref: parseOptionalStringField(req.body, 'ctaHref', 500),
+      backgroundImageUrl: parseOptionalStringField(req.body, 'backgroundImageUrl', 2000),
+      backgroundImageAlt: parseOptionalStringField(req.body, 'backgroundImageAlt', 200),
     };
 
     await upsertHeroContent(content);
@@ -4442,25 +4444,19 @@ app.post('/admin/content/about', async (req, res, next) => {
       respondHiddenNotFound(res);
       return;
     }
-
     const focusPoints = parseMultilineField(req.body, 'focusPoints');
 
-    if (focusPoints.length === 0) {
-      res.redirect(303, '/admin?status=invalid');
-      return;
-    }
-
     const content: AboutContent = {
-      eyebrow: parseRequiredStringField(req.body, 'eyebrow', 200),
-      heading: parseRequiredStringField(req.body, 'heading', 200),
-      paragraph1: parseRequiredStringField(req.body, 'paragraph1', 3000),
-      paragraph2: parseRequiredStringField(req.body, 'paragraph2', 3000),
-      paragraph3: parseRequiredStringField(req.body, 'paragraph3', 3000),
+      eyebrow: parseOptionalStringField(req.body, 'eyebrow', 200),
+      heading: parseOptionalStringField(req.body, 'heading', 200),
+      paragraph1: parseOptionalStringField(req.body, 'paragraph1', 3000),
+      paragraph2: parseOptionalStringField(req.body, 'paragraph2', 3000),
+      paragraph3: parseOptionalStringField(req.body, 'paragraph3', 3000),
       focusPoints,
-      processEyebrow: parseRequiredStringField(req.body, 'processEyebrow', 120),
-      processDescription: parseRequiredStringField(req.body, 'processDescription', 2000),
-      imageUrl: parseRequiredStringField(req.body, 'imageUrl', 2000),
-      imageAlt: parseRequiredStringField(req.body, 'imageAlt', 200),
+      processEyebrow: parseOptionalStringField(req.body, 'processEyebrow', 120),
+      processDescription: parseOptionalStringField(req.body, 'processDescription', 2000),
+      imageUrl: parseOptionalStringField(req.body, 'imageUrl', 2000),
+      imageAlt: parseOptionalStringField(req.body, 'imageAlt', 200),
     };
 
     await upsertAboutContent(content);
@@ -4501,7 +4497,7 @@ app.post('/admin/content/gallery', async (req, res, next) => {
       name: category.name,
       eyebrow: parseRequiredStringField(req.body, `galleryEyebrow:${category.name}`, 120),
       description: parseRequiredStringField(req.body, `galleryDescription:${category.name}`, 3000),
-      subcategories: category.subcategories,
+      subcategories: parseMultilineField(req.body, `gallerySubcategories:${category.name}`),
       rank: parseIntegerField(req.body, `galleryRank:${category.name}`, category.rank ?? 0),
     }));
 
@@ -4590,26 +4586,21 @@ app.post('/admin/content/contact', async (req, res, next) => {
     const projectOptions = parseMultilineField(req.body, 'projectOptions');
     const directContacts = parseDirectContacts(req.body, 'directContacts');
 
-    if (projectOptions.length === 0 || directContacts.length === 0) {
-      res.redirect(303, '/admin?status=invalid');
-      return;
-    }
-
     const content: ContactContent = {
-      eyebrow: parseRequiredStringField(req.body, 'eyebrow', 200),
-      heading: parseRequiredStringField(req.body, 'heading', 200),
-      description: parseRequiredStringField(req.body, 'description', 3000),
-      nameLabel: parseRequiredStringField(req.body, 'nameLabel', 120),
-      namePlaceholder: parseRequiredStringField(req.body, 'namePlaceholder', 200),
-      emailLabel: parseRequiredStringField(req.body, 'emailLabel', 120),
-      emailPlaceholder: parseRequiredStringField(req.body, 'emailPlaceholder', 200),
-      projectTypeLabel: parseRequiredStringField(req.body, 'projectTypeLabel', 120),
-      projectDefaultOption: parseRequiredStringField(req.body, 'projectDefaultOption', 120),
+      eyebrow: parseOptionalStringField(req.body, 'eyebrow', 200),
+      heading: parseOptionalStringField(req.body, 'heading', 200),
+      description: parseOptionalStringField(req.body, 'description', 3000),
+      nameLabel: parseOptionalStringField(req.body, 'nameLabel', 120),
+      namePlaceholder: parseOptionalStringField(req.body, 'namePlaceholder', 200),
+      emailLabel: parseOptionalStringField(req.body, 'emailLabel', 120),
+      emailPlaceholder: parseOptionalStringField(req.body, 'emailPlaceholder', 200),
+      projectTypeLabel: parseOptionalStringField(req.body, 'projectTypeLabel', 120),
+      projectDefaultOption: parseOptionalStringField(req.body, 'projectDefaultOption', 120),
       projectOptions,
-      messageLabel: parseRequiredStringField(req.body, 'messageLabel', 160),
-      messagePlaceholder: parseRequiredStringField(req.body, 'messagePlaceholder', 3000),
-      submitText: parseRequiredStringField(req.body, 'submitText', 120),
-      directContactLabel: parseRequiredStringField(req.body, 'directContactLabel', 200),
+      messageLabel: parseOptionalStringField(req.body, 'messageLabel', 160),
+      messagePlaceholder: parseOptionalStringField(req.body, 'messagePlaceholder', 3000),
+      submitText: parseOptionalStringField(req.body, 'submitText', 120),
+      directContactLabel: parseOptionalStringField(req.body, 'directContactLabel', 200),
       directContacts,
     };
 
@@ -4637,15 +4628,10 @@ app.post('/admin/content/craftsmanship', async (req, res, next) => {
 
     const items = parseCraftsmanshipItems(req.body, 'items');
 
-    if (items.length === 0) {
-      res.redirect(303, '/admin?status=invalid');
-      return;
-    }
-
     const content: CraftsmanshipContent = {
-      eyebrow: parseRequiredStringField(req.body, 'eyebrow', 200),
-      heading: parseRequiredStringField(req.body, 'heading', 200),
-      description: parseRequiredStringField(req.body, 'description', 3000),
+      eyebrow: parseOptionalStringField(req.body, 'eyebrow', 200),
+      heading: parseOptionalStringField(req.body, 'heading', 200),
+      description: parseOptionalStringField(req.body, 'description', 3000),
       items,
     };
 

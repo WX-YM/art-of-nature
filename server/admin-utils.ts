@@ -16,6 +16,21 @@ export function parseRequiredStringField(body: unknown, fieldName: string, maxLe
   return parsed;
 }
 
+export function parseOptionalStringField(body: unknown, fieldName: string, maxLength: number = 10000): string {
+  if (!body || typeof body !== 'object') {
+    return '';
+  }
+
+  const value = (body as Record<string, unknown>)[fieldName];
+  const parsed = typeof value === 'string' ? value.trim() : '';
+
+  if (parsed.length > maxLength) {
+    throw new Error(`Invalid ${fieldName}.`);
+  }
+
+  return parsed;
+}
+
 export function parseMultilineField(body: unknown, fieldName: string): string[] {
   if (!body || typeof body !== 'object') {
     return [];

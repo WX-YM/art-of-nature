@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  parseOptionalStringField,
   parseRequiredStringField,
   parseMultilineField,
   toContactLinksText,
@@ -19,6 +20,14 @@ test('parseRequiredStringField throws on missing, empty, or oversized values', (
   assert.throws(() => parseRequiredStringField({}, 'name'), /Invalid name/);
   assert.throws(() => parseRequiredStringField({ name: '   ' }, 'name'), /Invalid name/);
   assert.throws(() => parseRequiredStringField({ name: 'abcd' }, 'name', 3), /Invalid name/);
+});
+
+test('parseOptionalStringField trims valid strings and allows blank values', () => {
+  assert.equal(parseOptionalStringField({ name: '  hello  ' }, 'name'), 'hello');
+  assert.equal(parseOptionalStringField({ name: '   ' }, 'name'), '');
+  assert.equal(parseOptionalStringField({}, 'name'), '');
+  assert.equal(parseOptionalStringField(null, 'name'), '');
+  assert.throws(() => parseOptionalStringField({ name: 'abcd' }, 'name', 3), /Invalid name/);
 });
 
 test('parseMultilineField splits and trims lines ignoring empty ones', () => {

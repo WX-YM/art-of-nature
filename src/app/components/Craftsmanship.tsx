@@ -16,6 +16,10 @@ export function Craftsmanship({ content }: CraftsmanshipProps) {
     }))
     .filter((principle) => principle.title || principle.description);
 
+  if (!eyebrow && !heading && !description && principles.length === 0) {
+    return null;
+  }
+
   return (
     <section className="overflow-hidden bg-primary py-20 text-primary-foreground sm:py-24 lg:py-32">
       <div className="section-shell relative">

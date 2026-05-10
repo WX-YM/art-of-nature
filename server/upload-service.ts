@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const uploadsDir = path.resolve(__dirname, '..', 'uploads');
-export const maxUploadSizeBytes = 20 * 1024 * 1024;
+export const maxUploadSizeBytes = Number.MAX_SAFE_INTEGER;
 
 export const allowedImageMimeToExtension: Record<string, string> = {
   'image/jpeg': 'jpg',

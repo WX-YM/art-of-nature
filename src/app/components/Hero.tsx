@@ -15,6 +15,10 @@ export function Hero({ content }: HeroProps) {
   const backgroundImageUrl = content.backgroundImageUrl?.trim();
   const backgroundImageAlt = content.backgroundImageAlt?.trim();
 
+  if (!eyebrow && !headingLine1 && !headingLine2 && !description && !ctaText && !ctaHref && !backgroundImageUrl) {
+    return null;
+  }
+
   return (
     <section id="top" className="relative h-screen flex items-center justify-center">
       <div className="absolute inset-0">
