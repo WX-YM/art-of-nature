@@ -89,21 +89,19 @@ export function Navigation({ currentPath = '/', onNavigate }: NavigationProps) {
     <nav
       className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${
         isScrolled
-          ? 'border-b border-border/60 bg-transparent shadow-[0_18px_50px_rgba(45,41,38,0.08)] backdrop-blur-xl'
-          : 'border-b border-border/35 bg-transparent backdrop-blur-md'
+          ? 'border-b border-border/45 bg-transparent shadow-[0_18px_50px_rgba(45,41,38,0.08)] backdrop-blur-xl'
+          : 'border-b border-border/20 bg-transparent backdrop-blur-md'
       }`}
     >
       <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(247,242,234,0.97),rgba(243,236,227,0.96)_52%,rgba(247,242,234,0.97))]" />
-        <div
-          className="absolute inset-0 bg-repeat-x bg-center opacity-[0.5]"
-          style={{
-            backgroundImage: `url(${woodPatternUrl})`,
-            backgroundPosition: 'center center',
-            backgroundSize: '1240px 100%',
-          }}
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(250,247,242,0.92),rgba(247,242,235,0.9)_52%,rgba(250,247,242,0.92))]" />
+        <img
+          src={woodPatternUrl}
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full object-fill opacity-[0.82]"
         />
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(112,82,44,0.03))]" />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.16),rgba(255,255,255,0.04))]" />
       </div>
 
       <div className="section-shell relative flex items-center justify-between py-4 sm:py-5">

@@ -1,0 +1,10 @@
+<svg width="220" height="36" viewBox="0 0 220 36" xmlns="http://www.w3.org/2000/svg">
+  <!-- icon box -->
+  <rect x="0" y="2" width="32" height="32" fill="#e8e5de" stroke="#0a0a0a" stroke-width="1.2"/>
+  <text x="5" y="21" fill="#0a0a0a" font-family="'DM Mono', 'Courier New', monospace" font-weight="500" font-size="9" letter-spacing="-0.4">KY_</text>
+  <rect x="0" y="26" width="32" height="0.8" fill="#0a0a0a" opacity="0.18"/>
+  <text x="3" y="32" fill="#888888" font-family="'DM Mono', 'Courier New', monospace" font-size="4" letter-spacing="0.3">v2.0.26</text>
+  <!-- label -->
+  <text x="42" y="13" fill="#888888" font-family="'DM Mono', 'Courier New', monospace" font-size="7.5" letter-spacing="2">CREATED BY</text>
+  <text x="41" y="27" fill="#0a0a0a" font-family="'Syne', sans-serif" font-weight="800" font-size="15" letter-spacing="-0.6">KODEYARD</text>
+</svg>

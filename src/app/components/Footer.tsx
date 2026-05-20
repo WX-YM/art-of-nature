@@ -25,7 +25,7 @@ export function Footer({ currentPath = '/', onNavigate }: FooterProps) {
   const isDetachedPage = currentPath !== '/';
   const isJournalPage = currentPath === '/journal' || currentPath.startsWith('/journal/');
   const kodeyardLogoSrc =
-    '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/art%20of%20nature%20kodeyard%20logo%20with%20name%20.png';
+    '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/ky-stamp-all-white.svg';
   const navigationItems = [
     { href: '/gallery', label: 'Gallery' },
     { href: isDetachedPage ? '/#about' : '#about', label: 'About' },
@@ -96,7 +96,7 @@ export function Footer({ currentPath = '/', onNavigate }: FooterProps) {
           <div className="flex flex-col items-center gap-3 text-center md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center md:gap-8 md:text-left">
             <p className="md:order-1">© {year} Art of Nature. Crafted for bespoke interiors in Egypt and beyond.</p>
 
-            <div className="order-3 mt-1 flex w-full justify-center md:order-2 md:mt-0 md:w-auto">
+            <div className="order-3 mt-2 flex w-full justify-center md:order-2 md:mt-1 md:w-auto md:translate-x-5 md:justify-self-center">
               <a
                 href="https://kodeyard.com"
                 target="_blank"
@@ -107,7 +107,7 @@ export function Footer({ currentPath = '/', onNavigate }: FooterProps) {
                 <img
                   src={kodeyardLogoSrc}
                   alt="Created by Kodeyard"
-                  className="h-auto w-[10.5rem] object-contain opacity-95 md:w-[11.5rem]"
+                  className="h-auto w-[8rem] object-contain opacity-95 md:w-[9rem]"
                   loading="lazy"
                 />
               </a>
