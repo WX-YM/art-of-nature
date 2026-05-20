@@ -95,6 +95,9 @@ app.use(express.json({ limit: Number.MAX_SAFE_INTEGER }));
 app.use(express.urlencoded({ extended: true, limit: Number.MAX_SAFE_INTEGER }));
 app.use('/uploads', express.static(uploadsDir));
 app.use('/downloads', express.static(downloadsDir));
+app.get('/Woodpattern.svg', (_req, res) => {
+  res.sendFile(path.resolve(rootDir, 'Woodpattern.svg'));
+});
 app.use('/api', (req, res, next) => {
   setNoStore(res);
   next();

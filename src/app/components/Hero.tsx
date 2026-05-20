@@ -20,7 +20,22 @@ export function Hero({ content }: HeroProps) {
   }
 
   return (
-    <section id="top" className="relative h-screen flex items-center justify-center">
+    <section id="top" className="hero-section relative flex min-h-screen items-center justify-center">
+      <style>{`
+        @media (max-height: 900px) {
+          .hero-section {
+            align-items: flex-start;
+            padding-top: 7.5rem;
+            padding-bottom: 2.5rem;
+          }
+        }
+
+        @media (max-height: 760px) {
+          .hero-section {
+            padding-top: 8.5rem;
+          }
+        }
+      `}</style>
       <div className="absolute inset-0">
         {backgroundImageUrl && (
           <ImageWithFallback
