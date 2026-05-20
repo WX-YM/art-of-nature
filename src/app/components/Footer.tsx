@@ -24,6 +24,8 @@ export function Footer({ currentPath = '/', onNavigate }: FooterProps) {
   const year = new Date().getFullYear();
   const isDetachedPage = currentPath !== '/';
   const isJournalPage = currentPath === '/journal' || currentPath.startsWith('/journal/');
+  const kodeyardLogoSrc =
+    '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/art%20of%20nature%20kodeyard%20logo%20with%20name%20.png';
   const navigationItems = [
     { href: '/gallery', label: 'Gallery' },
     { href: isDetachedPage ? '/#about' : '#about', label: 'About' },
@@ -46,7 +48,7 @@ export function Footer({ currentPath = '/', onNavigate }: FooterProps) {
   };
 
   return (
-    <footer className="bg-primary py-16 text-primary-foreground">
+    <footer className="bg-primary pb-1 pt-16 text-primary-foreground md:py-16">
       <div className="section-shell">
         <div className="grid gap-12 md:grid-cols-4">
           <div className="md:col-span-2">
@@ -90,9 +92,31 @@ export function Footer({ currentPath = '/', onNavigate }: FooterProps) {
           </div>
         </div>
 
-        <div className="mt-12 flex flex-col gap-4 border-t border-primary-foreground/20 pt-8 text-sm text-primary-foreground/58 md:flex-row md:items-center md:justify-between">
-          <p>© {year} Art of Nature. Crafted for bespoke interiors in Egypt and beyond.</p>
-          <p>Design consultations available for residential, hospitality, and one-off statement pieces.</p>
+        <div className="mt-12 border-t border-primary-foreground/20 pt-8 text-sm text-primary-foreground/58">
+          <div className="flex flex-col items-center gap-3 text-center md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center md:gap-8 md:text-left">
+            <p className="md:order-1">© {year} Art of Nature. Crafted for bespoke interiors in Egypt and beyond.</p>
+
+            <div className="order-3 mt-1 flex w-full justify-center md:order-2 md:mt-0 md:w-auto">
+              <a
+                href="https://kodeyard.com"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Visit Kodeyard"
+                className="inline-flex transition-opacity hover:opacity-85"
+              >
+                <img
+                  src={kodeyardLogoSrc}
+                  alt="Created by Kodeyard"
+                  className="h-auto w-[10.5rem] object-contain opacity-95 md:w-[11.5rem]"
+                  loading="lazy"
+                />
+              </a>
+            </div>
+
+            <p className="order-2 md:order-3 md:text-right">
+              Design consultations available for residential, hospitality, and one-off statement pieces.
+            </p>
+          </div>
         </div>
       </div>
     </footer>
