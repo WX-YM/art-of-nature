@@ -24,8 +24,6 @@ export function Footer({ currentPath = '/', onNavigate }: FooterProps) {
   const year = new Date().getFullYear();
   const isDetachedPage = currentPath !== '/';
   const isJournalPage = currentPath === '/journal' || currentPath.startsWith('/journal/');
-  const kodeyardLogoSrc =
-    '/uploads/banana-bee-font/AON-high-resolution-logo/AON-high-resolution-logo/ky-stamp-all-white.svg';
   const navigationItems = [
     { href: '/gallery', label: 'Gallery' },
     { href: isDetachedPage ? '/#about' : '#about', label: 'About' },
@@ -96,22 +94,8 @@ export function Footer({ currentPath = '/', onNavigate }: FooterProps) {
           <div className="flex flex-col items-center gap-3 text-center md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center md:gap-8 md:text-left">
             <p className="md:order-1">© {year} Art of Nature. Crafted for bespoke interiors in Egypt and beyond.</p>
 
-            <div className="order-3 mt-2 flex w-full justify-center md:order-2 md:mt-1 md:w-auto md:translate-x-5 md:justify-self-center">
-              <a
-                href="https://kodeyard.com"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Visit Kodeyard"
-                className="inline-flex transition-opacity hover:opacity-85"
-              >
-                <img
-                  src={kodeyardLogoSrc}
-                  alt="Created by Kodeyard"
-                  className="h-auto w-[8rem] object-contain opacity-95 md:w-[9rem]"
-                  loading="lazy"
-                />
-              </a>
-            </div>
+            {/* Centre slot intentionally left empty; keeps the three-column layout on desktop. */}
+            <div aria-hidden="true" className="hidden md:order-2 md:block" />
 
             <p className="order-2 md:order-3 md:text-right">
               Design consultations available for residential, hospitality, and one-off statement pieces.
