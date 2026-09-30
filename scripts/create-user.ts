@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
 import mongoose from 'mongoose';
 import { connectToDatabase } from '../server/db';
 import { UserModel } from '../server/models/User';
+import { hashPassword } from '../server/http-utils';
 
 function getArgValue(flag: string): string | undefined {
   const index = process.argv.indexOf(flag);
@@ -13,18 +13,15 @@ function getArgValue(flag: string): string | undefined {
   return process.argv[index + 1];
 }
 
-function sha256Hex(value: string) {
-  return createHash('sha256').update(value).digest('hex');
-}
-
 function printUsage() {
-  console.error('Usage: npm run create:user -- --user "Admin" --email "admin@example.com" --password "your-secret"');
+  console.error('Usage: CREATE_USER_PASSWORD="your-secret" npm run create:user -- --user "Admin" --email "admin@example.com"');
+  console.error('       (--password "your-secret" also works but leaves the password in shell history and the process list)');
 }
 
 async function run() {
   const user = getArgValue('--user')?.trim();
   const email = getArgValue('--email')?.trim().toLowerCase();
-  const password = getArgValue('--password');
+  const password = process.env.CREATE_USER_PASSWORD || getArgValue('--password');
 
   if (!user || !email || !password) {
     printUsage();
@@ -32,9 +29,15 @@ async function run() {
     return;
   }
 
+  if (password.length < 12) {
+    console.error('Password must be at least 12 characters long.');
+    process.exitCode = 1;
+    return;
+  }
+
   await connectToDatabase();
 
-  const hashedPassword = sha256Hex(password);
+  const hashedPassword = hashPassword(password);
 
   await UserModel.findOneAndUpdate(
     { email },

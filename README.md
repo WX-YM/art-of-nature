@@ -19,7 +19,7 @@
 
   Create/update an admin user with:
 
-  `npm run create:user -- --user "Admin" --email "admin@example.com" --password "your-secret"`
+  `CREATE_USER_PASSWORD="your-secret" npm run create:user -- --user "Admin" --email "admin@example.com"` (passwords are stored as salted scrypt hashes; existing SHA-256 hashes are upgraded automatically on the next successful login)
 
   ## Production Data Migration
 

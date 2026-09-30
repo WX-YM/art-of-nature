@@ -1,5 +1,6 @@
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import type { HeroContent } from '../lib/heroContent';
+import { isSafeHref } from '../lib/contactLinks';
 
 type HeroProps = {
   content: HeroContent;
@@ -11,7 +12,8 @@ export function Hero({ content }: HeroProps) {
   const headingLine2 = content.headingLine2?.trim();
   const description = content.description?.trim();
   const ctaText = content.ctaText?.trim();
-  const ctaHref = content.ctaHref?.trim();
+  const rawCtaHref = content.ctaHref?.trim();
+  const ctaHref = rawCtaHref && isSafeHref(rawCtaHref) ? rawCtaHref : undefined;
   const backgroundImageUrl = content.backgroundImageUrl?.trim();
   const backgroundImageAlt = content.backgroundImageAlt?.trim();
 

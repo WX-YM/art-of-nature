@@ -6,6 +6,9 @@ import { getUploadFile, uploadsDir } from './upload-service';
 
 const imageVariantCacheDir = path.resolve(uploadsDir, '..', '.cache', 'public-image-variants');
 
+const widthStep = 50;
+const qualityStep = 5;
+
 const allowedFormats = new Set(['webp', 'avif', 'jpeg', 'png'] as const);
 
 export type PublicImageVariantFormat = 'webp' | 'avif' | 'jpeg' | 'png';
@@ -61,10 +64,12 @@ export function parsePublicImageVariantRequest(query: Record<string, unknown>): 
     throw new Error('Invalid format.');
   }
 
+  // Snap to coarse steps so the on-disk variant cache cannot be flooded with
+  // near-duplicate renders of every width/quality combination.
   return {
     relativePath,
-    width: Math.trunc(width),
-    quality: Math.trunc(qualityValue),
+    width: Math.min(2400, Math.ceil(width / widthStep) * widthStep),
+    quality: Math.min(90, Math.max(20, Math.round(qualityValue / qualityStep) * qualityStep)),
     format: requestedFormat as PublicImageVariantFormat,
   };
 }

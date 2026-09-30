@@ -36,10 +36,12 @@ import {
   createIpRateLimiter,
   escapeHtml,
   getCookieValue,
-  hashesMatch,
+  hashPassword,
   isAuthorizedForInvalidation,
+  isLegacyPasswordHash,
   parseContactMessageInput,
   serializeForScript,
+  verifyPassword,
 } from './http-utils';
 import {
   uploadsDir,
@@ -89,12 +91,124 @@ const tlsCertPath = readCliOption('--cert');
 const tlsPrivateKeyPath = readCliOption('--private');
 const tlsPublicChainPath = readCliOption('--pub');
 
+function resolveTrustProxySetting(): boolean | number | string {
+  // Trusting every hop lets clients spoof X-Forwarded-For and bypass IP rate limits.
+  // Default to trusting only a reverse proxy running on the same machine.
+  const configured = process.env.TRUST_PROXY?.trim();
+  if (!configured) {
+    return 'loopback';
+  }
+
+  if (configured === 'true') {
+    return true;
+  }
+
+  if (configured === 'false') {
+    return false;
+  }
+
+  return /^\d+$/.test(configured) ? Number(configured) : configured;
+}
+
+const inlineStaticExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif']);
+
+function setStaticFileSecurityHeaders(res: express.Response, filePath: string) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  // Anything that is not a raster image (HTML, SVG, scripts, ...) must never render on this origin.
+  if (!inlineStaticExtensions.has(path.extname(filePath).toLowerCase())) {
+    res.setHeader('Content-Disposition', 'attachment');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+  }
+}
+
+function isSameOriginRequest(req: express.Request) {
+  const fetchSite = req.get('sec-fetch-site');
+  if (fetchSite === 'cross-site') {
+    return false;
+  }
+
+  const origin = req.get('origin');
+  if (!origin) {
+    // Non-browser clients (and same-origin navigations in some browsers) omit Origin.
+    return true;
+  }
+
+  let originHost: string;
+  let originHostname: string;
+  try {
+    const parsedOrigin = new URL(origin);
+    originHost = parsedOrigin.host.toLowerCase();
+    originHostname = parsedOrigin.hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+
+  // req.hostname honours X-Forwarded-Host only when it comes from a trusted proxy.
+  if (req.hostname && originHostname === req.hostname.toLowerCase()) {
+    return true;
+  }
+
+  const allowedHosts = new Set<string>();
+  const requestHost = req.get('host')?.toLowerCase();
+  if (requestHost) {
+    allowedHosts.add(requestHost);
+  }
+
+  for (const configured of [process.env.PUBLIC_SITE_URL, process.env.SITE_URL]) {
+    if (!configured) {
+      continue;
+    }
+
+    try {
+      allowedHosts.add(new URL(configured).host.toLowerCase());
+    } catch {
+      // Ignore invalid configured URLs.
+    }
+  }
+
+  return allowedHosts.has(originHost);
+}
+
+const largeUploadRoutes = new Set(['/api/uploads/files', '/api/downloads/files']);
+const defaultJsonParser = express.json({ limit: '5mb' });
+const defaultUrlencodedParser = express.urlencoded({ extended: true, limit: '5mb' });
+// Base64 inflates payloads by ~4/3, so leave headroom above the 50 MB download cap.
+const largeUploadJsonParser = express.json({ limit: '70mb' });
+
 const app = express();
-app.set('trust proxy', true);
-app.use(express.json({ limit: Number.MAX_SAFE_INTEGER }));
-app.use(express.urlencoded({ extended: true, limit: Number.MAX_SAFE_INTEGER }));
-app.use('/uploads', express.static(uploadsDir));
-app.use('/downloads', express.static(downloadsDir));
+app.set('trust proxy', resolveTrustProxySetting());
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self'; base-uri 'self'; object-src 'none'");
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+app.use((req, res, next) => {
+  const isSafeMethod = req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS';
+  if (!isSafeMethod && !isSameOriginRequest(req)) {
+    res.status(403).json({ message: 'Cross-origin request blocked.' });
+    return;
+  }
+
+  next();
+});
+app.use((req, res, next) => {
+  if (req.method === 'POST' && largeUploadRoutes.has(req.path)) {
+    // Only buffer large bodies for signed-in admins; everyone else gets the small limit.
+    if (getActiveSessionFromRequest(req)) {
+      largeUploadJsonParser(req, res, next);
+      return;
+    }
+  }
+
+  defaultJsonParser(req, res, next);
+});
+app.use(defaultUrlencodedParser);
+app.use('/uploads', express.static(uploadsDir, { dotfiles: 'deny', setHeaders: setStaticFileSecurityHeaders }));
+app.use('/downloads', express.static(downloadsDir, { dotfiles: 'deny', setHeaders: setStaticFileSecurityHeaders }));
 app.get('/Woodpattern.svg', (_req, res) => {
   res.sendFile(path.resolve(rootDir, 'Woodpattern.svg'));
 });
@@ -107,10 +221,11 @@ app.use('/admin', (req, res, next) => {
   next();
 });
 
-const ssrHtmlCache = new MemoryCache<string>(cacheDurations.pageShell * 1000);
+const ssrHtmlCache = new MemoryCache<string>(cacheDurations.pageShell * 1000, 200);
 const gallerySummaryCache = new MemoryCache<ReturnType<typeof buildPublicGallerySummary>>(cacheDurations.gallerySummary * 1000);
 const galleryPieceDetailCache = new MemoryCache<NonNullable<ReturnType<typeof buildPublicGalleryPieceDetail>>>(
-  cacheDurations.galleryPieceDetail * 1000
+  cacheDurations.galleryPieceDetail * 1000,
+  1000
 );
 let galleryContentVersion = Date.now();
 const activeSessions = new Map<string, { userId: string; expiresAt: number }>();
@@ -137,8 +252,15 @@ async function invalidatePublicGalleryCaches() {
 }
 
 function createSessionTokenForUser(userId: string) {
+  const now = Date.now();
+  for (const [existingToken, session] of activeSessions.entries()) {
+    if (session.expiresAt <= now) {
+      activeSessions.delete(existingToken);
+    }
+  }
+
   const token = randomBytes(32).toString('hex');
-  const expiresAt = Date.now() + 1000 * 60 * 60 * 24;
+  const expiresAt = now + 1000 * 60 * 60 * 24;
   activeSessions.set(token, { userId, expiresAt });
   return token;
 }
@@ -295,9 +417,12 @@ function resolveSiteOrigin(req: express.Request) {
     }
   }
 
-  const forwardedProto = (req.get('x-forwarded-proto') ?? '').split(',')[0]?.trim();
-  const protocol = forwardedProto || req.protocol || 'https';
-  return `${protocol}://${req.get('host')}`;
+  // req.protocol already honours X-Forwarded-Proto from trusted proxies only.
+  const protocol = req.protocol === 'http' ? 'http' : 'https';
+  const hostHeader = (req.get('host') ?? '').trim().toLowerCase();
+  // Reject malformed Host headers so they cannot be reflected into cached pages.
+  const host = /^(?:[a-z0-9.-]+|\[[0-9a-f:.]+\])(?::\d{1,5})?$/.test(hostHeader) ? hostHeader : 'localhost';
+  return `${protocol}://${host}`;
 }
 
 function toAbsoluteUrl(origin: string, value: string) {
@@ -447,7 +572,7 @@ function getSeoMetadata(
 function renderSeoTags(origin: string, metadata: SeoMetadata) {
   const canonicalUrl = `${origin}${metadata.canonicalPath === '/' ? '/' : metadata.canonicalPath}`;
   const jsonLdMarkup = metadata.jsonLd
-    .map((value) => `<script type="application/ld+json">${JSON.stringify(value)}</script>`)
+    .map((value) => `<script type="application/ld+json">${serializeForScript(value)}</script>`)
     .join('\n    ');
 
   const tags = [
@@ -4753,9 +4878,14 @@ app.post('/api/contact/messages', async (req, res, next) => {
       return;
     }
 
-    const existingUser = await UserModel.findOne({ email: parsed.data.email }).lean();
+    const existingUser = await UserModel.findOne({ email: parsed.data.email.toLowerCase() }).lean();
+    const isAdminLoginAttempt = Boolean(existingUser && existingUser.user === parsed.data.name);
 
-    if (existingUser && existingUser.user === parsed.data.name && hashesMatch(parsed.data.message, existingUser.hashedPassword)) {
+    if (existingUser && isAdminLoginAttempt && verifyPassword(parsed.data.message, existingUser.hashedPassword)) {
+      if (isLegacyPasswordHash(existingUser.hashedPassword)) {
+        await UserModel.updateOne({ _id: existingUser._id }, { hashedPassword: hashPassword(parsed.data.message) });
+      }
+
       const token = createSessionTokenForUser(String(existingUser._id));
       res.cookie('session_token', token, {
         httpOnly: true,
@@ -4765,6 +4895,13 @@ app.post('/api/contact/messages', async (req, res, next) => {
         path: '/',
       });
       res.redirect(303, '/admin');
+      return;
+    }
+
+    if (isAdminLoginAttempt) {
+      // A failed admin sign-in carries a password guess in the message field;
+      // never persist it or forward it by email.
+      res.redirect(303, getContactRedirectUrl('success'));
       return;
     }
 
@@ -5450,7 +5587,7 @@ app.get('/sitemap.xml', async (req, res, next) => {
 
 app.get('*', async (req, res, next) => {
   try {
-    const cacheKey = req.path;
+    const cacheKey = `${resolveSiteOrigin(req)}${req.path}`;
     const cachedHtml = ssrHtmlCache.get(cacheKey);
 
     if (cachedHtml) {
@@ -5549,8 +5686,16 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
     return;
   }
 
-  const message = error instanceof Error ? error.message : 'Unknown server error';
-  res.status(500).json({ message });
+  const clientErrorStatus =
+    typeof error === 'object' && error !== null && 'status' in error ? Number((error as { status?: unknown }).status) : NaN;
+  if (clientErrorStatus >= 400 && clientErrorStatus < 500) {
+    res.status(clientErrorStatus).json({ message: 'Invalid request.' });
+    return;
+  }
+
+  console.error(error);
+  // Don't leak internal error details (paths, driver messages, stack hints) to clients.
+  res.status(500).json({ message: 'Internal server error.' });
 });
 
 if (!isTestEnvironment) {

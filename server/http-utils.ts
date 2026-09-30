@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type express from 'express';
 import type { ContactMessageInput } from '../src/app/lib/contactMessage';
 
@@ -14,6 +14,49 @@ export function hashesMatch(rawValue: string, hashedValue: string) {
   }
 
   return timingSafeEqual(Buffer.from(incomingHash), Buffer.from(hashedValue));
+}
+
+export function safeStringEqual(left: string, right: string) {
+  // Compare digests so neither the length nor the content leaks through timing.
+  return timingSafeEqual(createHash('sha256').update(left).digest(), createHash('sha256').update(right).digest());
+}
+
+const scryptPrefix = 'scrypt';
+const scryptKeyLength = 64;
+const scryptOptions = { N: 16384, r: 8, p: 1 } as const;
+
+export function hashPassword(password: string) {
+  const salt = randomBytes(16);
+  const derived = scryptSync(password, salt, scryptKeyLength, scryptOptions);
+  return `${scryptPrefix}$${salt.toString('hex')}$${derived.toString('hex')}`;
+}
+
+export function isLegacyPasswordHash(hashedPassword: string) {
+  return !hashedPassword.startsWith(`${scryptPrefix}$`);
+}
+
+export function verifyPassword(password: string, hashedPassword: string) {
+  if (typeof hashedPassword !== 'string' || !hashedPassword) {
+    return false;
+  }
+
+  if (isLegacyPasswordHash(hashedPassword)) {
+    // Unsalted SHA-256 hashes created by older versions of scripts/create-user.ts.
+    return hashesMatch(password, hashedPassword);
+  }
+
+  const [, saltHex, hashHex] = hashedPassword.split('$');
+  if (!saltHex || !hashHex) {
+    return false;
+  }
+
+  const expected = Buffer.from(hashHex, 'hex');
+  if (expected.length !== scryptKeyLength) {
+    return false;
+  }
+
+  const derived = scryptSync(password, Buffer.from(saltHex, 'hex'), scryptKeyLength, scryptOptions);
+  return timingSafeEqual(derived, expected);
 }
 
 export function getCookieValue(cookieHeader: string | undefined, cookieName: string) {
@@ -115,6 +158,12 @@ export function parseContactMessageInput(body: unknown): { data: ContactMessageI
     return { error: 'All fields are required.' };
   }
 
+  // Single-line fields end up in email headers when messages are forwarded.
+  const controlCharacterPattern = /[\u0000-\u001f\u007f]/;
+  if ([name, email, phone, projectType].some((value) => controlCharacterPattern.test(value))) {
+    return { error: 'One or more fields contain invalid characters.' };
+  }
+
   if (name.length > 120 || email.length > 254 || phone.length > 40 || projectType.length > 120 || message.length > 5000) {
     return { error: 'One or more fields exceed allowed length.' };
   }
@@ -151,5 +200,9 @@ export function isAuthorizedForInvalidation(requestToken: string | undefined) {
     return false; // Secure by default
   }
 
-  return requestToken === expectedToken;
+  if (typeof requestToken !== 'string' || !requestToken) {
+    return false;
+  }
+
+  return safeStringEqual(requestToken, expectedToken);
 }

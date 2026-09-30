@@ -6,7 +6,10 @@ type CacheEntry<T> = {
 export class MemoryCache<T> {
   private readonly entries = new Map<string, CacheEntry<T>>();
 
-  constructor(private readonly ttlMs: number) {}
+  constructor(
+    private readonly ttlMs: number,
+    private readonly maxEntries: number = 500
+  ) {}
 
   get(key: string) {
     const entry = this.entries.get(key);
@@ -24,6 +27,16 @@ export class MemoryCache<T> {
   }
 
   set(key: string, value: T) {
+    this.entries.delete(key);
+
+    // Bound memory use: evict the oldest entry when the cache is full.
+    if (this.entries.size >= this.maxEntries) {
+      const oldestKey = this.entries.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.entries.delete(oldestKey);
+      }
+    }
+
     this.entries.set(key, {
       value,
       expiresAt: Date.now() + this.ttlMs,

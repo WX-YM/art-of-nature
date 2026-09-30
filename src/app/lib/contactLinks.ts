@@ -15,6 +15,30 @@ function normalizeHref(href: string) {
   return href.trim();
 }
 
+const safeHrefSchemes = new Set(['http:', 'https:', 'mailto:', 'tel:']);
+
+// Blocks javascript:, data:, vbscript: and similar URLs from admin-editable content.
+export function isSafeHref(href: string) {
+  const trimmed = href.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (/^[/#?]/.test(trimmed) && !trimmed.startsWith('//')) {
+    return true;
+  }
+
+  // Browsers ignore embedded whitespace/control characters when parsing schemes.
+  const compact = trimmed.replace(/[\u0000-\u0020\u007f]+/g, '').toLowerCase();
+  const schemeMatch = /^([a-z][a-z0-9+.-]*):/.exec(compact);
+  if (!schemeMatch) {
+    // Scheme-less relative path such as "gallery" or "page.html".
+    return !trimmed.startsWith('//');
+  }
+
+  return safeHrefSchemes.has(`${schemeMatch[1]}:`);
+}
+
 function normalizeLabel(label: string) {
   return label.trim();
 }
@@ -84,7 +108,7 @@ export function resolveContactLinks(directContacts: ContactLink[]) {
       href: normalizeHref(contact.href),
       label: normalizeLabel(contact.label),
     }))
-    .filter((contact) => Boolean(contact.href && contact.label));
+    .filter((contact) => Boolean(contact.href && contact.label) && isSafeHref(contact.href));
 
   const phoneLink = trimmedLinks.find((contact) => getContactLinkKind(contact.href) === 'phone');
   const hasInstagram = trimmedLinks.some((contact) => getContactLinkKind(contact.href) === 'instagram');

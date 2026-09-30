@@ -1,3 +1,4 @@
+import { isSafeHref } from '../src/app/lib/contactLinks';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -5,6 +6,9 @@ import {
   escapeHtml,
   getCookieValue,
   hashesMatch,
+  hashPassword,
+  isLegacyPasswordHash,
+  verifyPassword,
   isAuthorizedForInvalidation,
   parseContactMessageInput,
   serializeForScript,
@@ -165,4 +169,46 @@ test('createIpRateLimiter tracks remaining calls, blocks overflow, and resets af
   } finally {
     Date.now = originalDateNow;
   }
+});
+
+test('hashPassword produces salted scrypt hashes that verifyPassword accepts', () => {
+  const first = hashPassword('correct horse battery staple');
+  const second = hashPassword('correct horse battery staple');
+
+  assert.notEqual(first, second);
+  assert.equal(isLegacyPasswordHash(first), false);
+  assert.equal(verifyPassword('correct horse battery staple', first), true);
+  assert.equal(verifyPassword('wrong password', first), false);
+  assert.equal(verifyPassword('anything', 'scrypt$bad'), false);
+});
+
+test('verifyPassword still accepts legacy SHA-256 hashes', () => {
+  const legacy = '31160254d1297393d2ad00e1c01851aec834361e02c524b89fe06aff2879ce6a';
+
+  assert.equal(isLegacyPasswordHash(legacy), true);
+  assert.equal(verifyPassword('secret-value', legacy), true);
+  assert.equal(verifyPassword('other-value', legacy), false);
+});
+
+test('parseContactMessageInput rejects control characters in header-bound fields', () => {
+  const result = parseContactMessageInput({
+    name: 'Jane\r\nBcc: victim@example.com',
+    email: 'jane@example.com',
+    projectType: 'Furniture',
+    message: 'Line one\nLine two',
+  });
+
+  assert.ok('error' in result);
+});
+
+test('isSafeHref allows web, mail and phone links but blocks script URLs', () => {
+  assert.equal(isSafeHref('https://example.com'), true);
+  assert.equal(isSafeHref('mailto:info@example.com'), true);
+  assert.equal(isSafeHref('tel:+201030422422'), true);
+  assert.equal(isSafeHref('#contact'), true);
+  assert.equal(isSafeHref('/gallery'), true);
+  assert.equal(isSafeHref('javascript:alert(1)'), false);
+  assert.equal(isSafeHref(' JaVa\tScRiPt:alert(1)'), false);
+  assert.equal(isSafeHref('data:text/html,<script>alert(1)</script>'), false);
+  assert.equal(isSafeHref('//evil.example'), false);
 });
